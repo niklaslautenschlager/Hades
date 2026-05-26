@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/hades.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Hades</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <!-- Catch any JS crash that happens before React mounts and show it on screen -->
+    <script>
+      function showError(title, msg, stack) {
+        document.body.innerHTML =
+          '<div style="position:fixed;inset:0;background:#09090b;color:#f87171;padding:32px;' +
+          'font-family:monospace;font-size:13px;overflow:auto;white-space:pre-wrap;z-index:99999">' +
+          '<strong style="font-size:16px">' + title + '</strong>\n\n' + msg +
+          (stack ? '\n\n' + stack : '') + '</div>';
+      }
+      window.addEventListener('error', function(e) {
+        showError('Startup Error', e.message, e.error && e.error.stack);
+      });
+      window.addEventListener('unhandledrejection', function(e) {
+        var r = e.reason;
+        showError('Unhandled Promise Rejection',
+          r instanceof Error ? r.message : String(r),
+          r instanceof Error ? r.stack : '');
+      });
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

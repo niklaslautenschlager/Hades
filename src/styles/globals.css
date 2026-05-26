@@ -1,0 +1,148 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    box-sizing: border-box;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    background: #09090b;
+    color: #f4f4f5;
+    font-family: "Inter", system-ui, sans-serif;
+  }
+
+  ::-webkit-scrollbar {
+    width: 4px;
+    height: 4px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.08);
+    border-radius: 2px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.14);
+  }
+
+  ::selection {
+    background: rgba(255, 255, 255, 0.15);
+  }
+}
+
+@layer components {
+  .surface {
+    @apply bg-zinc-900 border border-zinc-800/50 rounded-xl;
+  }
+
+  .surface-hover {
+    @apply hover:border-zinc-700/60 hover:bg-zinc-900/80 transition-all duration-200;
+  }
+
+  .text-primary {
+    @apply text-zinc-100;
+  }
+
+  .text-secondary {
+    @apply text-zinc-400;
+  }
+
+  .text-muted {
+    @apply text-zinc-600;
+  }
+
+  .btn-ghost {
+    @apply px-3 py-1.5 rounded-lg text-sm font-medium text-zinc-400 hover:text-zinc-100
+           hover:bg-zinc-800/60 transition-all duration-150 cursor-pointer;
+  }
+
+  .btn-primary {
+    @apply px-4 py-2 rounded-lg text-sm font-medium bg-zinc-100 text-zinc-950
+           hover:bg-white transition-all duration-150 cursor-pointer;
+  }
+
+  .input-base {
+    @apply w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2
+           text-sm text-zinc-100 placeholder:text-zinc-600
+           focus:outline-none focus:border-zinc-600 focus:ring-0
+           transition-colors duration-150;
+  }
+
+  .tag {
+    @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs
+           font-medium bg-zinc-800/60 text-zinc-400 border border-zinc-700/40;
+  }
+}
+
+/* CodeMirror — layout handled by the JS theme; only colours/aesthetics here */
+.cm-editor.cm-focused {
+  outline: none !important;
+}
+
+.cm-content {
+  color: #f4f4f5;
+  caret-color: #f4f4f5;
+}
+
+.cm-gutters {
+  background: transparent !important;
+  border-right: 1px solid rgba(255, 255, 255, 0.06) !important;
+  color: #3f3f46;
+  min-width: 48px;
+}
+
+.cm-lineNumbers .cm-gutterElement {
+  padding: 0 12px 0 8px;
+  font-size: 12px;
+}
+
+.cm-activeLine {
+  background: rgba(255, 255, 255, 0.025) !important;
+}
+
+.cm-activeLineGutter {
+  background: transparent !important;
+  color: #71717a;
+}
+
+.cm-cursor {
+  border-left-color: #f4f4f5 !important;
+}
+
+.cm-selectionBackground {
+  background: rgba(255, 255, 255, 0.1) !important;
+}
+
+.cm-focused .cm-selectionBackground {
+  background: rgba(255, 255, 255, 0.12) !important;
+}
+
+/* Vim mode status bar */
+.cm-vim-panel {
+  background: #18181b;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  color: #a1a1aa;
+  padding: 2px 16px;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 12px;
+}
+
+/* Markdown syntax highlighting */
+.cm-header { color: #f4f4f5; font-weight: 600; }
+.cm-strong { color: #e4e4e7; font-weight: 600; }
+.cm-em { color: #d4d4d8; font-style: italic; }
+.cm-link { color: #a1a1aa; text-decoration: underline; }
+.cm-url { color: #71717a; }
+.cm-quote { color: #71717a; border-left: 2px solid #3f3f46; padding-left: 8px; }
+.cm-code { color: #d4d4d8; background: rgba(255,255,255,0.05); padding: 1px 4px; border-radius: 3px; }
