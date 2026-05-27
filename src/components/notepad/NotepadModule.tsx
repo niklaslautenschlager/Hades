@@ -23,7 +23,7 @@ import { exportAsMarkdown, exportAsPdf } from "../../lib/noteExport";
 import { importObsidianVault } from "../../lib/noteImport";
 
 export default function NotepadModule() {
-  const { notes, activeNoteId, isVimMode, toggleVimMode, updateNote, importNotes } = useStore(
+  const { notes, activeNoteId, isVimMode, toggleVimMode, updateNote, importNotes, showNotepadPdf, toggleNotepadPdf } = useStore(
     useShallow((s) => ({
       notes: s.notes,
       activeNoteId: s.activeNoteId,
@@ -31,6 +31,8 @@ export default function NotepadModule() {
       toggleVimMode: s.toggleVimMode,
       updateNote: s.updateNote,
       importNotes: s.importNotes,
+      showNotepadPdf: s.showNotepadPdf,
+      toggleNotepadPdf: s.toggleNotepadPdf,
     }))
   );
 
@@ -38,7 +40,6 @@ export default function NotepadModule() {
   const [tagInput, setTagInput] = useState("");
   const [showTagInput, setShowTagInput] = useState(false);
   const [editing, setEditing] = useState(false);
-  const [showPdf, setShowPdf] = useState(false);
   const [showExportMenu, setShowExportMenu] = useState(false);
   const [showSidebar, setShowSidebar] = useState(true);
   const importRef = useRef<HTMLInputElement>(null);
@@ -177,9 +178,9 @@ export default function NotepadModule() {
                 </button>
 
                 {/* Tags */}
-                <div className="flex items-center gap-1.5 flex-wrap">
+                <div className="flex items-center gap-1.5 overflow-x-auto min-w-0 flex-shrink">
                   {activeNote.tags.map((tag) => (
-                    <span key={tag} className="tag flex items-center gap-1">
+                    <span key={tag} className="tag flex items-center gap-1 flex-shrink-0">
                       #{tag}
                       <button
                         onClick={() => removeTag(tag)}
@@ -203,12 +204,12 @@ export default function NotepadModule() {
                       onBlur={() => setShowTagInput(false)}
                       placeholder="tag-name"
                       className="text-xs bg-surface-hover border border-border rounded px-1.5 py-0.5
-                                 text-foreground-secondary outline-none w-24 font-mono"
+                                 text-foreground-secondary outline-none w-24 font-mono flex-shrink-0"
                     />
                   ) : (
                     <button
                       onClick={() => setShowTagInput(true)}
-                      className="tag opacity-60 hover:opacity-100 cursor-pointer"
+                      className="tag opacity-60 hover:opacity-100 cursor-pointer flex-shrink-0"
                     >
                       <Tag className="w-2.5 h-2.5" />
                       <span>tag</span>
@@ -220,14 +221,14 @@ export default function NotepadModule() {
               <div className="flex items-center gap-2">
                 {/* PDF viewer toggle */}
                 <button
-                  onClick={() => setShowPdf((v) => !v)}
+                  onClick={toggleNotepadPdf}
                   className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium
                                transition-all duration-150
-                               ${showPdf
+                               ${showNotepadPdf
                                  ? "bg-foreground text-surface"
                                  : "text-muted hover:text-foreground-secondary hover:bg-surface-hover"
                                }`}
-                  title={showPdf ? "Close PDF viewer" : "Open PDF viewer"}
+                  title={showNotepadPdf ? "Close PDF viewer" : "Open PDF viewer"}
                 >
                   <BookOpen className="w-3.5 h-3.5" />
                   PDF
@@ -396,7 +397,7 @@ export default function NotepadModule() {
       </div>
 
       {/* PDF Viewer panel — resizable */}
-      {showPdf && (
+      {showNotepadPdf && (
         <>
           {/* PDF resize handle */}
           <div
@@ -407,8 +408,8 @@ export default function NotepadModule() {
             onPointerUp={onPdfDividerPointerUp}
             onPointerCancel={onPdfDividerPointerUp}
           />
-          <div style={{ width: `${pdfWidth}%` }} className="flex-shrink-0 min-w-0 min-h-0">
-            <PdfViewer onClose={() => setShowPdf(false)} />
+          <div style={{ width: `${pdfWidth}%` }} className="flex-shrink-0 min-w-0 min-h-0 overflow-hidden">
+            <PdfViewer onClose={toggleNotepadPdf} />
           </div>
         </>
       )}

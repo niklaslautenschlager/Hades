@@ -175,6 +175,7 @@ interface AppState {
   notes: NoteFile[];
   activeNoteId: string | null;
   isVimMode: boolean;
+  showNotepadPdf: boolean;
 
   addNote: (parentId?: string | null) => string;
   addFolder: (parentId?: string | null) => void;
@@ -183,6 +184,7 @@ interface AppState {
   moveNote: (id: string, newParentId: string | null) => void;
   setActiveNote: (id: string | null) => void;
   toggleVimMode: () => void;
+  toggleNotepadPdf: () => void;
   importNotes: (files: { name: string; content: string; parentKey: string | null; selfKey: string | null; isFolder: boolean }[]) => void;
 
   // ── Tasks ─────────────────────────────────────────────────────────────────
@@ -417,6 +419,7 @@ export const useStore = create<AppState>()(
       ],
       activeNoteId: "welcome",
       isVimMode: false,
+      showNotepadPdf: false,
 
       addNote: (parentId = null) => {
         const id = uid();
@@ -490,6 +493,7 @@ export const useStore = create<AppState>()(
         })),
       setActiveNote: (activeNoteId) => set({ activeNoteId }),
       toggleVimMode: () => set((s) => ({ isVimMode: !s.isVimMode })),
+      toggleNotepadPdf: () => set((s) => ({ showNotepadPdf: !s.showNotepadPdf })),
 
       importNotes: (files) => {
         set((s) => {

@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { EditorView, keymap, lineNumbers, highlightActiveLine } from "@codemirror/view";
 import { EditorState, Compartment } from "@codemirror/state";
-import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
+import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
+import { closeBrackets, closeBracketsKeymap } from "@codemirror/autocomplete";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { syntaxHighlighting, defaultHighlightStyle } from "@codemirror/language";
 import { vim } from "@replit/codemirror-vim";
@@ -64,7 +65,8 @@ export default function Editor({ noteId, content, onChange }: Props) {
         extensions: [
           vimCompartment.current.of(isVimMode ? vim() : []),
           history(),
-          keymap.of([...defaultKeymap, ...historyKeymap]),
+          closeBrackets(),
+          keymap.of([indentWithTab, ...closeBracketsKeymap, ...defaultKeymap, ...historyKeymap]),
           markdown({ base: markdownLanguage }),
           syntaxHighlighting(defaultHighlightStyle),
           lineNumbers(),

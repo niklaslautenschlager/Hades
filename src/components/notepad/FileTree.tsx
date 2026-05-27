@@ -87,7 +87,7 @@ function FileNode({ file, depth, allFiles }: FileNodeProps) {
     }))
   );
 
-  const [expanded, setExpanded] = useState(true);
+  const [expanded, setExpanded] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [nameDraft, setNameDraft] = useState(file.name);
   const [menuOpen, setMenuOpen] = useState(false);
