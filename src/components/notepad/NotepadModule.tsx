@@ -1,4 +1,4 @@
-import { useCallback, useState, useRef } from "react";
+import { useCallback, useMemo, useState, useRef } from "react";
 import {
   Terminal,
   Type,
@@ -43,6 +43,11 @@ export default function NotepadModule() {
   const [showExportMenu, setShowExportMenu] = useState(false);
   const [showSidebar, setShowSidebar] = useState(true);
   const importRef = useRef<HTMLInputElement>(null);
+
+  const wordCount = useMemo(
+    () => activeNote?.content.trim().split(/\s+/).filter(Boolean).length ?? 0,
+    [activeNote?.content]
+  );
 
   // ── PDF panel resizable state ──────────────────────────────────────────────
   const [pdfWidth, setPdfWidth] = useState(50); // percentage
@@ -219,6 +224,11 @@ export default function NotepadModule() {
               </div>
 
               <div className="flex items-center gap-2">
+                {/* Word count */}
+                {wordCount > 0 && (
+                  <span className="text-xs text-muted">{wordCount} words</span>
+                )}
+
                 {/* PDF viewer toggle */}
                 <button
                   onClick={toggleNotepadPdf}

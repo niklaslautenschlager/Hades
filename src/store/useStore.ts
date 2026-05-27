@@ -143,6 +143,8 @@ interface AppState {
   startTimer: () => void;
   pauseTimer: () => void;
   resetTimer: () => void;
+  skipSession: () => void;
+  setPomodoroMode: (mode: PomodoroMode) => void;
   setGoal: (goal: string) => void;
   setPomodoroSettings: (s: {
     workDuration?: number;
@@ -193,7 +195,9 @@ interface AppState {
   addTask: (text: string) => void;
   toggleTask: (id: string) => void;
   deleteTask: (id: string) => void;
+  editTask: (id: string, text: string) => void;
   reorderTasks: (from: number, to: number) => void;
+  clearCompletedTasks: () => void;
 
   // ── Flashcards ────────────────────────────────────────────────────────────
   flashcardDecks: FlashcardDeck[];
@@ -326,6 +330,51 @@ export const useStore = create<AppState>()(
             ? breakDuration * 60
             : longBreakDuration * 60;
         set({ isRunning: false, _intervalId: null, timeLeft: total });
+      },
+
+      skipSession: () => {
+        const s = get();
+        if (s._intervalId) clearInterval(s._intervalId);
+
+        const sessions =
+          s.pomodoroMode === "work" ? s.sessionsCompleted + 1 : s.sessionsCompleted;
+
+        let nextMode: PomodoroMode = "break";
+        if (s.pomodoroMode === "work") {
+          nextMode =
+            sessions % s.sessionsUntilLongBreak === 0 ? "longBreak" : "break";
+        } else {
+          nextMode = "work";
+        }
+
+        set({
+          isRunning: false,
+          _intervalId: null,
+          pomodoroMode: nextMode,
+          sessionsCompleted: sessions,
+          timeLeft:
+            nextMode === "work"
+              ? s.workDuration * 60
+              : nextMode === "break"
+              ? s.breakDuration * 60
+              : s.longBreakDuration * 60,
+        });
+      },
+
+      setPomodoroMode: (mode) => {
+        const { _intervalId, workDuration, breakDuration, longBreakDuration } = get();
+        if (_intervalId) clearInterval(_intervalId);
+        set({
+          pomodoroMode: mode,
+          isRunning: false,
+          _intervalId: null,
+          timeLeft:
+            mode === "work"
+              ? workDuration * 60
+              : mode === "break"
+              ? breakDuration * 60
+              : longBreakDuration * 60,
+        });
       },
 
       setGoal: (goal) => set({ goal }),
@@ -574,6 +623,10 @@ export const useStore = create<AppState>()(
       },
       deleteTask: (id) =>
         set((s) => ({ tasks: s.tasks.filter((t) => t.id !== id) })),
+      editTask: (id, text) =>
+        set((s) => ({
+          tasks: s.tasks.map((t) => (t.id === id ? { ...t, text } : t)),
+        })),
       reorderTasks: (from, to) =>
         set((s) => {
           const tasks = [...s.tasks];
@@ -581,6 +634,8 @@ export const useStore = create<AppState>()(
           tasks.splice(to, 0, item);
           return { tasks };
         }),
+      clearCompletedTasks: () =>
+        set((s) => ({ tasks: s.tasks.filter((t) => !t.completed) })),
 
       // ── Flashcards ────────────────────────────────────────────────────────
       flashcardDecks: [],

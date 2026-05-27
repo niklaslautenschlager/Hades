@@ -31,6 +31,8 @@ export default function PomodoroModule() {
     startTimer,
     pauseTimer,
     resetTimer,
+    skipSession,
+    setPomodoroMode,
     setGoal,
   } = useStore(
     useShallow((s) => ({
@@ -46,6 +48,8 @@ export default function PomodoroModule() {
       startTimer: s.startTimer,
       pauseTimer: s.pauseTimer,
       resetTimer: s.resetTimer,
+      skipSession: s.skipSession,
+      setPomodoroMode: s.setPomodoroMode,
       setGoal: s.setGoal,
     }))
   );
@@ -114,6 +118,7 @@ export default function PomodoroModule() {
           {(Object.keys(MODE_LABELS) as PomodoroMode[]).map((mode) => (
             <button
               key={mode}
+              onClick={() => setPomodoroMode(mode)}
               className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-150
                           ${pomodoroMode === mode
                             ? "bg-foreground text-surface"
@@ -205,10 +210,10 @@ export default function PomodoroModule() {
           </motion.button>
 
           <button
-            onClick={() => { pauseTimer(); resetTimer(); }}
+            onClick={skipSession}
             className="flex items-center justify-center w-10 h-10 rounded-xl
                        text-muted hover:text-foreground-secondary hover:bg-surface-hover transition-all"
-            title="Skip"
+            title="Skip to next session"
           >
             <SkipForward className="w-4 h-4" />
           </button>

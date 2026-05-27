@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useMemo } from "react";
 import { Send, Bot, User, Loader2, Trash2, AlertCircle, Zap } from "lucide-react";
+import { marked } from "marked";
 import { motion, AnimatePresence } from "framer-motion";
 import { useShallow } from "zustand/react/shallow";
 import { useStore } from "../../store/useStore";
@@ -11,6 +12,8 @@ import {
   GROQ_MODELS,
   type Command,
 } from "../../lib/ai";
+
+marked.setOptions({ breaks: true, gfm: true });
 
 interface Props {
   goal: string;
@@ -383,15 +386,16 @@ export default function AIAssistant({ goal }: Props) {
                   <Bot className="w-3.5 h-3.5 text-foreground-secondary" />
                 )}
               </div>
-              <div
-                className={`max-w-[80%] px-3.5 py-2.5 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap
-                             ${msg.role === "user"
-                               ? "bg-surface-hover text-foreground rounded-tr-sm"
-                               : "bg-surface-elevated border border-border text-foreground-secondary rounded-tl-sm"
-                             }`}
-              >
-                {msg.content}
-              </div>
+              {msg.role === "user" ? (
+                <div className="max-w-[80%] px-3.5 py-2.5 rounded-2xl rounded-tr-sm text-sm leading-relaxed whitespace-pre-wrap bg-surface-hover text-foreground">
+                  {msg.content}
+                </div>
+              ) : (
+                <div
+                  className="markdown-body prose-chat max-w-[80%] px-3.5 py-2.5 rounded-2xl rounded-tl-sm bg-surface-elevated border border-border"
+                  dangerouslySetInnerHTML={{ __html: marked.parse(msg.content) as string }}
+                />
+              )}
             </motion.div>
           ))}
         </AnimatePresence>
@@ -405,10 +409,12 @@ export default function AIAssistant({ goal }: Props) {
             <div className="flex-shrink-0 w-7 h-7 rounded-full bg-surface-elevated border border-border flex items-center justify-center">
               <Bot className="w-3.5 h-3.5 text-foreground-secondary" />
             </div>
-            <div className="max-w-[80%] px-3.5 py-2.5 rounded-2xl rounded-tl-sm text-sm
-                            leading-relaxed bg-surface-elevated border border-border text-foreground-secondary whitespace-pre-wrap">
-              {streamingContent}
-              <span className="inline-block w-1 h-3.5 ml-0.5 bg-foreground-secondary animate-pulse rounded-sm align-text-bottom" />
+            <div className="max-w-[80%] px-3.5 py-2.5 rounded-2xl rounded-tl-sm bg-surface-elevated border border-border">
+              <div
+                className="markdown-body prose-chat"
+                dangerouslySetInnerHTML={{ __html: marked.parse(streamingContent) as string }}
+              />
+              <span className="inline-block w-1 h-3.5 bg-foreground-secondary animate-pulse rounded-sm align-text-bottom" />
             </div>
           </motion.div>
         )}

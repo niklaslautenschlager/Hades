@@ -15,6 +15,14 @@ function formatHours(seconds: number): string {
   return (seconds / 3600).toFixed(1);
 }
 
+function getDayColor(duration: number): string {
+  if (duration === 0) return "var(--color-surface-hover)";
+  if (duration < 3600) return "var(--heatmap-low, #3f3f46)";
+  if (duration < 7200) return "var(--heatmap-mid, #71717a)";
+  if (duration < 10800) return "var(--heatmap-high, #a1a1aa)";
+  return "var(--heatmap-max, #e4e4e7)";
+}
+
 function todayStr(): string {
   return new Date().toISOString().split("T")[0];
 }
@@ -112,6 +120,40 @@ export default function StatsModule() {
   }, [focusSessions]);
 
   const maxDuration = Math.max(...last7Days.map((d) => d.duration), 1);
+
+  const heatmapData = useMemo(() => {
+    const endDate = new Date();
+    endDate.setHours(0, 0, 0, 0);
+    const daysUntilSaturday = (6 - endDate.getDay() + 7) % 7;
+    endDate.setDate(endDate.getDate() + daysUntilSaturday);
+
+    const days: { dateStr: string; duration: number; label: string }[] = [];
+    for (let i = 370; i >= 0; i--) {
+      const d = new Date(endDate);
+      d.setDate(d.getDate() - i);
+      const dateStr = d.toISOString().split("T")[0];
+      const session = focusSessions.find((f) => f.date === dateStr);
+      const label = d.toLocaleDateString("en", { weekday: "short", month: "short", day: "numeric" });
+      days.push({ dateStr, duration: session?.duration ?? 0, label });
+    }
+    return days;
+  }, [focusSessions]);
+
+  const monthLabels = useMemo(() => {
+    const labels: (string | null)[] = [];
+    for (let col = 0; col < 53; col++) {
+      const dayIndex = col * 7;
+      if (dayIndex >= heatmapData.length) { labels.push(null); continue; }
+      const day = heatmapData[dayIndex];
+      const d = new Date(day.dateStr + "T00:00:00");
+      if (col === 0 || d.getDate() <= 7) {
+        labels.push(d.toLocaleDateString("en", { month: "short" }));
+      } else {
+        labels.push(null);
+      }
+    }
+    return labels;
+  }, [heatmapData]);
 
   return (
     <div className="flex flex-col h-full">
@@ -221,6 +263,49 @@ export default function StatsModule() {
               ))}
             </div>
           </div>
+
+          {/* Year Overview heatmap */}
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="surface p-6"
+          >
+            <h2 className="text-sm font-semibold text-foreground mb-4">Year Overview</h2>
+            <div className="overflow-x-auto">
+              <div style={{ display: "inline-block" }}>
+                {/* Month labels */}
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(53, 11px)", gap: "2px", marginBottom: "4px" }}>
+                  {monthLabels.map((label, col) => (
+                    <div key={col} style={{ height: "12px", fontSize: "10px", color: "var(--color-muted)", whiteSpace: "nowrap" }}>
+                      {label ?? ""}
+                    </div>
+                  ))}
+                </div>
+                {/* Day cells */}
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateRows: "repeat(7, 11px)",
+                    gridAutoFlow: "column",
+                    gap: "2px",
+                  }}
+                >
+                  {heatmapData.map((day) => (
+                    <div
+                      key={day.dateStr}
+                      title={day.duration > 0 ? `${formatDuration(day.duration)} on ${day.label}` : day.label}
+                      style={{
+                        width: "11px",
+                        height: "11px",
+                        borderRadius: "2px",
+                        backgroundColor: getDayColor(day.duration),
+                      }}
+                    />
+                  ))}
+                </div>
+              </div>
+            </div>
+          </motion.div>
 
           {/* Totals */}
           <div className="surface p-6">

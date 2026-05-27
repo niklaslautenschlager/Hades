@@ -9,12 +9,23 @@ interface TaskItemProps {
 }
 
 function TaskItem({ task }: TaskItemProps) {
-  const { toggleTask, deleteTask } = useStore(
+  const { toggleTask, deleteTask, editTask } = useStore(
     useShallow((s) => ({
       toggleTask: s.toggleTask,
       deleteTask: s.deleteTask,
+      editTask: s.editTask,
     }))
   );
+
+  const [isEditing, setIsEditing] = useState(false);
+  const [editText, setEditText] = useState(task.text);
+
+  function commitEdit() {
+    if (editText.trim()) {
+      editTask(task.id, editText.trim());
+    }
+    setIsEditing(false);
+  }
 
   return (
     <div className="group flex items-center gap-3 px-4 py-3.5 surface
@@ -55,20 +66,38 @@ function TaskItem({ task }: TaskItemProps) {
 
       {/* Task text with animated strike-through */}
       <div className="flex-1 relative">
-        <span
-          className={`text-sm transition-colors duration-300 ${
-            task.completed ? "text-muted" : "text-foreground"
-          }`}
-        >
-          {task.text}
-        </span>
+        {isEditing ? (
+          <input
+            autoFocus
+            type="text"
+            value={editText}
+            onChange={(e) => setEditText(e.target.value)}
+            onBlur={commitEdit}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") commitEdit();
+              if (e.key === "Escape") setIsEditing(false);
+            }}
+            className="text-sm bg-transparent border-none outline-none flex-1 w-full text-foreground"
+          />
+        ) : (
+          <>
+            <span
+              onDoubleClick={() => { setEditText(task.text); setIsEditing(true); }}
+              className={`text-sm transition-colors duration-300 ${
+                task.completed ? "text-muted" : "text-foreground"
+              }`}
+            >
+              {task.text}
+            </span>
 
-        <motion.div
-          className="absolute left-0 right-0 top-1/2 -translate-y-1/2 h-px bg-muted"
-          initial={false}
-          animate={{ scaleX: task.completed ? 1 : 0, originX: 0 }}
-          transition={{ duration: 0.3, ease: "easeInOut" }}
-        />
+            <motion.div
+              className="absolute left-0 right-0 top-1/2 -translate-y-1/2 h-px bg-muted"
+              initial={false}
+              animate={{ scaleX: task.completed ? 1 : 0, originX: 0 }}
+              transition={{ duration: 0.3, ease: "easeInOut" }}
+            />
+          </>
+        )}
       </div>
 
       {/* Delete */}
@@ -85,10 +114,11 @@ function TaskItem({ task }: TaskItemProps) {
 }
 
 export default function TasksModule() {
-  const { tasks, addTask } = useStore(
+  const { tasks, addTask, clearCompletedTasks } = useStore(
     useShallow((s) => ({
       tasks: s.tasks,
       addTask: s.addTask,
+      clearCompletedTasks: s.clearCompletedTasks,
     }))
   );
 
@@ -111,9 +141,20 @@ export default function TasksModule() {
       <header className="flex items-center justify-between px-6 py-4 border-b border-border flex-shrink-0">
         <div>
           <h1 className="text-sm font-semibold text-foreground">Tasks</h1>
-          <p className="text-xs text-muted mt-0.5">
-            {pending.length} remaining · {done.length} done
-          </p>
+          <div className="flex items-center gap-2 mt-0.5">
+            <p className="text-xs text-muted">
+              {pending.length} remaining · {done.length} done
+            </p>
+            {done.length > 0 && (
+              <button
+                onClick={clearCompletedTasks}
+                className="flex items-center gap-1 text-xs text-muted hover:text-foreground-secondary transition-colors"
+              >
+                <Trash2 className="w-3 h-3" />
+                Clear completed
+              </button>
+            )}
+          </div>
         </div>
       </header>
 

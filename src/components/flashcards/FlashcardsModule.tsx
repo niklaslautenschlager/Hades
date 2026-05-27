@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import {
   Plus,
   Trash2,
@@ -58,6 +58,25 @@ function ReviewSession({
       setCurrentIndex((v) => v + 1);
     }
   }
+
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (!card) return;
+      if (!showBack && (e.key === " " || e.key === "Enter")) {
+        e.preventDefault();
+        setShowBack(true);
+        return;
+      }
+      if (showBack) {
+        if (e.key === "1") handleRate(0 as ReviewRating);
+        else if (e.key === "2") handleRate(2 as ReviewRating);
+        else if (e.key === "3") handleRate(3 as ReviewRating);
+        else if (e.key === "4") handleRate(5 as ReviewRating);
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [showBack, card]);
 
   if (!card || reviewed >= total) {
     return (
@@ -124,7 +143,7 @@ function ReviewSession({
             {showBack ? card.back : card.front}
           </p>
           {!showBack && (
-            <p className="text-xs text-muted mt-6">Click to reveal</p>
+            <p className="text-xs text-muted mt-6">Click to reveal · Space</p>
           )}
         </motion.div>
       </div>
@@ -140,17 +159,18 @@ function ReviewSession({
           >
             <span className="text-xs text-muted mr-2">How well did you know it?</span>
             {([
-              { rating: 0 as ReviewRating, label: "Again", color: "text-red-400 hover:bg-red-950/40" },
-              { rating: 2 as ReviewRating, label: "Hard", color: "text-orange-400 hover:bg-orange-950/40" },
-              { rating: 3 as ReviewRating, label: "Good", color: "text-green-400 hover:bg-green-950/40" },
-              { rating: 5 as ReviewRating, label: "Easy", color: "text-blue-400 hover:bg-blue-950/40" },
-            ]).map(({ rating, label, color }) => (
+              { rating: 0 as ReviewRating, label: "Again", key: "1", color: "text-red-400 hover:bg-red-950/40" },
+              { rating: 2 as ReviewRating, label: "Hard", key: "2", color: "text-orange-400 hover:bg-orange-950/40" },
+              { rating: 3 as ReviewRating, label: "Good", key: "3", color: "text-green-400 hover:bg-green-950/40" },
+              { rating: 5 as ReviewRating, label: "Easy", key: "4", color: "text-blue-400 hover:bg-blue-950/40" },
+            ]).map(({ rating, label, key, color }) => (
               <button
                 key={rating}
                 onClick={() => handleRate(rating)}
                 className={`px-4 py-2 rounded-lg text-sm font-medium border border-border
                            transition-all duration-150 ${color}`}
               >
+                <kbd className="font-mono text-[10px] opacity-60 mr-1">{key}</kbd>
                 {label}
               </button>
             ))}
@@ -166,24 +186,43 @@ function ReviewSession({
 function AddCardModal({
   deckId,
   onClose,
+  initialFront,
+  initialBack,
+  editCardId,
 }: {
   deckId: string;
   onClose: () => void;
+  initialFront?: string;
+  initialBack?: string;
+  editCardId?: string;
 }) {
-  const addFlashcard = useStore((s) => s.addFlashcard);
-  const [front, setFront] = useState("");
-  const [back, setBack] = useState("");
+  const { addFlashcard, updateFlashcard } = useStore(
+    useShallow((s) => ({ addFlashcard: s.addFlashcard, updateFlashcard: s.updateFlashcard }))
+  );
+  const [front, setFront] = useState(initialFront ?? "");
+  const [back, setBack] = useState(initialBack ?? "");
 
-  function handleAdd() {
+  const isEdit = Boolean(editCardId);
+
+  function handleSave() {
     if (!front.trim() || !back.trim()) return;
-    addFlashcard(deckId, front.trim(), back.trim());
-    setFront("");
-    setBack("");
+    if (isEdit) {
+      updateFlashcard(editCardId!, { front: front.trim(), back: back.trim() });
+      onClose();
+    } else {
+      addFlashcard(deckId, front.trim(), back.trim());
+      setFront("");
+      setBack("");
+    }
   }
 
-  function handleAddAndClose() {
+  function handleSaveAndClose() {
     if (front.trim() && back.trim()) {
-      addFlashcard(deckId, front.trim(), back.trim());
+      if (isEdit) {
+        updateFlashcard(editCardId!, { front: front.trim(), back: back.trim() });
+      } else {
+        addFlashcard(deckId, front.trim(), back.trim());
+      }
     }
     onClose();
   }
@@ -197,7 +236,9 @@ function AddCardModal({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between mb-5">
-          <h2 className="text-base font-semibold text-foreground">Add Flashcard</h2>
+          <h2 className="text-base font-semibold text-foreground">
+            {isEdit ? "Edit Flashcard" : "Add Flashcard"}
+          </h2>
           <button onClick={onClose} className="btn-ghost !p-1.5"><X className="w-4 h-4" /></button>
         </div>
 
@@ -221,17 +262,21 @@ function AddCardModal({
               placeholder="The answer is..."
               rows={3}
               className="input-base resize-none text-sm"
-              onKeyDown={(e) => { if (e.key === "Enter" && e.metaKey) handleAdd(); }}
+              onKeyDown={(e) => { if (e.key === "Enter" && e.metaKey) handleSave(); }}
             />
           </div>
         </div>
 
         <div className="flex items-center justify-end gap-3 mt-5 pt-4 border-t border-border">
-          <button onClick={handleAdd} className="btn-ghost text-sm" disabled={!front.trim() || !back.trim()}>
-            Add & Continue
-          </button>
-          <button onClick={handleAddAndClose} className="btn-primary text-sm">
-            {front.trim() && back.trim() ? "Add & Close" : "Close"}
+          {!isEdit && (
+            <button onClick={handleSave} className="btn-ghost text-sm" disabled={!front.trim() || !back.trim()}>
+              Add & Continue
+            </button>
+          )}
+          <button onClick={handleSaveAndClose} className="btn-primary text-sm">
+            {isEdit
+              ? "Save & Close"
+              : (front.trim() && back.trim() ? "Add & Close" : "Close")}
           </button>
         </div>
       </motion.div>
@@ -261,6 +306,7 @@ function DeckView({
   const today = todayStr();
   const dueCount = cards.filter((c) => c.nextReview <= today).length;
   const [addModal, setAddModal] = useState(false);
+  const [editCard, setEditCard] = useState<Flashcard | null>(null);
 
   return (
     <div className="flex flex-col h-full">
@@ -311,6 +357,12 @@ function DeckView({
                     {card.nextReview <= today ? "Due" : `${card.interval}d`}
                   </span>
                   <button
+                    onClick={() => setEditCard(card)}
+                    className="opacity-0 group-hover:opacity-100 text-muted hover:text-foreground-secondary transition-all"
+                  >
+                    <Edit3 className="w-3.5 h-3.5" />
+                  </button>
+                  <button
                     onClick={() => deleteFlashcard(card.id)}
                     className="opacity-0 group-hover:opacity-100 text-muted hover:text-red-400 transition-all"
                   >
@@ -324,6 +376,15 @@ function DeckView({
       </div>
 
       {addModal && <AddCardModal deckId={deck.id} onClose={() => setAddModal(false)} />}
+      {editCard && (
+        <AddCardModal
+          deckId={deck.id}
+          editCardId={editCard.id}
+          initialFront={editCard.front}
+          initialBack={editCard.back}
+          onClose={() => setEditCard(null)}
+        />
+      )}
     </div>
   );
 }
