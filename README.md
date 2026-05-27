@@ -1,4 +1,6 @@
-# Hades
+# Hades `v0.1.0-alpha`
+
+> **Pre-alpha software.** Bugs, crashes, and missing features are expected. Use at your own risk and back up any important data.
 
 A focused, distraction-free desktop productivity suite built for students and knowledge workers. Hades combines a Pomodoro timer with an AI study assistant, a markdown note editor, calendar, task manager, flashcards with spaced repetition, and detailed focus statistics — all in one unified interface.
 
