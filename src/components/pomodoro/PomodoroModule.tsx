@@ -17,12 +17,6 @@ const MODE_LABELS: Record<PomodoroMode, string> = {
   longBreak: "Long Break",
 };
 
-const MODE_COLORS: Record<PomodoroMode, string> = {
-  work: "rgba(244,244,245,0.9)",
-  break: "rgba(161,161,170,0.7)",
-  longBreak: "rgba(113,113,122,0.6)",
-};
-
 export default function PomodoroModule() {
   const {
     pomodoroMode,
@@ -116,14 +110,14 @@ export default function PomodoroModule() {
         className="flex flex-col items-center justify-center flex-shrink-0 px-8 gap-8 overflow-hidden"
       >
         {/* Mode tabs */}
-        <div className="flex items-center gap-1 bg-zinc-900 border border-zinc-800/60 rounded-xl p-1">
+        <div className="flex items-center gap-1 bg-surface-elevated border border-border rounded-xl p-1">
           {(Object.keys(MODE_LABELS) as PomodoroMode[]).map((mode) => (
             <button
               key={mode}
               className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-150
                           ${pomodoroMode === mode
-                            ? "bg-zinc-100 text-zinc-950"
-                            : "text-zinc-500 hover:text-zinc-300"
+                            ? "bg-foreground text-surface"
+                            : "text-muted hover:text-foreground-secondary"
                           }`}
             >
               {MODE_LABELS[mode]}
@@ -139,7 +133,7 @@ export default function PomodoroModule() {
               cy="112"
               r={RADIUS}
               fill="none"
-              stroke="rgba(255,255,255,0.05)"
+              stroke="var(--color-border)"
               strokeWidth="6"
             />
             <motion.circle
@@ -147,21 +141,25 @@ export default function PomodoroModule() {
               cy="112"
               r={RADIUS}
               fill="none"
-              stroke={MODE_COLORS[pomodoroMode]}
+              stroke="var(--color-foreground)"
               strokeWidth="6"
               strokeLinecap="round"
               strokeDasharray={CIRCUMFERENCE}
               strokeDashoffset={strokeDash}
               animate={{ strokeDashoffset: strokeDash }}
               transition={{ duration: 0.5, ease: "easeOut" }}
+              style={{ opacity: pomodoroMode === "work" ? 0.9 : pomodoroMode === "break" ? 0.6 : 0.4 }}
             />
           </svg>
 
           <div className="absolute flex flex-col items-center">
-            <span className="font-mono text-5xl font-semibold text-zinc-100 tracking-tight tabular-nums">
+            <span
+              className="text-6xl font-light text-foreground tracking-[-0.02em]"
+              style={{ fontFamily: "'Inter', system-ui, sans-serif", fontFeatureSettings: '"tnum"' }}
+            >
               {mins}:{secs}
             </span>
-            <span className="text-xs font-medium text-zinc-500 mt-1 uppercase tracking-widest">
+            <span className="text-xs font-medium text-muted mt-1 uppercase tracking-widest">
               {MODE_LABELS[pomodoroMode]}
             </span>
           </div>
@@ -173,11 +171,11 @@ export default function PomodoroModule() {
             <div
               key={i}
               className={`w-1.5 h-1.5 rounded-full transition-all duration-300 ${
-                filled ? "bg-zinc-200" : "bg-zinc-700"
+                filled ? "bg-foreground" : "bg-surface-hover"
               }`}
             />
           ))}
-          <span className="ml-2 text-xs text-zinc-600">
+          <span className="ml-2 text-xs text-muted">
             {sessionsCompleted} completed
           </span>
         </div>
@@ -187,7 +185,7 @@ export default function PomodoroModule() {
           <button
             onClick={resetTimer}
             className="flex items-center justify-center w-10 h-10 rounded-xl
-                       text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800/60 transition-all"
+                       text-muted hover:text-foreground-secondary hover:bg-surface-hover transition-all"
           >
             <RotateCcw className="w-4 h-4" />
           </button>
@@ -196,7 +194,7 @@ export default function PomodoroModule() {
             whileTap={{ scale: 0.94 }}
             onClick={isRunning ? pauseTimer : startTimer}
             className="flex items-center justify-center w-16 h-16 rounded-2xl
-                       bg-zinc-100 hover:bg-white text-zinc-950 transition-all duration-150
+                       bg-foreground hover:opacity-90 text-surface transition-all duration-150
                        shadow-glow"
           >
             {isRunning ? (
@@ -209,7 +207,7 @@ export default function PomodoroModule() {
           <button
             onClick={() => { pauseTimer(); resetTimer(); }}
             className="flex items-center justify-center w-10 h-10 rounded-xl
-                       text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800/60 transition-all"
+                       text-muted hover:text-foreground-secondary hover:bg-surface-hover transition-all"
             title="Skip"
           >
             <SkipForward className="w-4 h-4" />
@@ -219,8 +217,8 @@ export default function PomodoroModule() {
         {/* Goal */}
         <div className="w-full">
           <div className="flex items-center gap-2 mb-2">
-            <Target className="w-3.5 h-3.5 text-zinc-500" />
-            <span className="text-xs font-medium text-zinc-500 uppercase tracking-wider">
+            <Target className="w-3.5 h-3.5 text-muted" />
+            <span className="text-xs font-medium text-muted uppercase tracking-wider">
               Session Goal
             </span>
           </div>
@@ -246,14 +244,14 @@ export default function PomodoroModule() {
           ) : (
             <button
               onClick={() => { setGoalDraft(goal); setEditingGoal(true); }}
-              className="w-full text-left px-3 py-2.5 bg-zinc-900 border border-zinc-800/50
-                         rounded-lg text-sm transition-all duration-150 hover:border-zinc-700/60
+              className="w-full text-left px-3 py-2.5 bg-surface-elevated border border-border
+                         rounded-lg text-sm transition-all duration-150 hover:border-border-active
                          group"
             >
               {goal ? (
-                <span className="text-zinc-300">{goal}</span>
+                <span className="text-foreground-secondary">{goal}</span>
               ) : (
-                <span className="text-zinc-600 group-hover:text-zinc-500">
+                <span className="text-muted group-hover:text-foreground-secondary">
                   Click to set a goal for this session...
                 </span>
               )}
@@ -264,8 +262,8 @@ export default function PomodoroModule() {
 
       {/* ── Resize handle ────────────────────────────────────────────── */}
       <div
-        className="w-[5px] flex-shrink-0 cursor-col-resize border-r border-zinc-800/50
-                   hover:border-zinc-600/60 hover:bg-zinc-800/20 transition-colors duration-150"
+        className="w-[5px] flex-shrink-0 cursor-col-resize border-r border-border
+                   hover:border-border-active hover:bg-surface-hover transition-colors duration-150"
         onPointerDown={onDividerPointerDown}
         onPointerMove={onDividerPointerMove}
         onPointerUp={onDividerPointerUp}

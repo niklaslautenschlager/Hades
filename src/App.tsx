@@ -1,4 +1,4 @@
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, useEffect } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { useStore } from "./store/useStore";
 import Shell from "./components/layout/Shell";
@@ -6,8 +6,10 @@ import CalendarModule from "./components/calendar/CalendarModule";
 import PomodoroModule from "./components/pomodoro/PomodoroModule";
 import TasksModule from "./components/tasks/TasksModule";
 
-// Lazy-load the notepad so CodeMirror + vim don't run at startup
+// Lazy-load heavy modules
 const NotepadModule = lazy(() => import("./components/notepad/NotepadModule"));
+const FlashcardsModule = lazy(() => import("./components/flashcards/FlashcardsModule"));
+const StatsModule = lazy(() => import("./components/stats/StatsModule"));
 
 const pageVariants = {
   initial: { opacity: 0, y: 6 },
@@ -17,6 +19,12 @@ const pageVariants = {
 
 export default function App() {
   const activeModule = useStore((s) => s.activeModule);
+  const theme = useStore((s) => s.theme);
+
+  // Apply theme class to root element
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", theme);
+  }, [theme]);
 
   return (
     <Shell>
@@ -38,6 +46,16 @@ export default function App() {
             </Suspense>
           )}
           {activeModule === "tasks" && <TasksModule />}
+          {activeModule === "flashcards" && (
+            <Suspense fallback={<div className="flex-1" />}>
+              <FlashcardsModule />
+            </Suspense>
+          )}
+          {activeModule === "stats" && (
+            <Suspense fallback={<div className="flex-1" />}>
+              <StatsModule />
+            </Suspense>
+          )}
         </motion.div>
       </AnimatePresence>
     </Shell>

@@ -8,10 +8,43 @@
     "core:default",
     "core:window:allow-start-dragging",
     "shell:allow-open",
-    "http:default",
+    {
+      "identifier": "http:default",
+      "allow": [
+        { "url": "https://api.groq.com/*" },
+        { "url": "https://*" }
+      ]
+    },
     "store:allow-get",
     "store:allow-set",
     "store:allow-save",
-    "store:allow-load"
+    "store:allow-load",
+    "dialog:allow-save",
+    "dialog:allow-open",
+    "dialog:allow-ask",
+    {
+      "identifier": "fs:allow-write-text-file",
+      "allow": [{ "path": "**" }]
+    },
+    {
+      "identifier": "fs:allow-write-file",
+      "allow": [{ "path": "**" }]
+    },
+    {
+      "identifier": "fs:allow-read-file",
+      "allow": [{ "path": "**" }]
+    },
+    {
+      "identifier": "fs:allow-read-dir",
+      "allow": [{ "path": "**" }]
+    },
+    {
+      "identifier": "fs:allow-mkdir",
+      "allow": [{ "path": "**" }]
+    },
+    {
+      "identifier": "fs:allow-exists",
+      "allow": [{ "path": "**" }]
+    }
   ]
 }

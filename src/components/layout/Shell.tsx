@@ -6,6 +6,10 @@ import {
   CheckSquare,
   Settings,
   Flame,
+  Layers,
+  BarChart3,
+  Sun,
+  Moon,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { useShallow } from "zustand/react/shallow";
@@ -13,10 +17,12 @@ import { useStore, type Module } from "../../store/useStore";
 import SettingsModal from "../settings/SettingsModal";
 
 const NAV_ITEMS: { id: Module; icon: React.ElementType; label: string }[] = [
-  { id: "calendar", icon: Calendar, label: "Calendar" },
   { id: "pomodoro", icon: Timer, label: "Focus" },
+  { id: "calendar", icon: Calendar, label: "Calendar" },
   { id: "notepad", icon: FileText, label: "Notes" },
   { id: "tasks", icon: CheckSquare, label: "Tasks" },
+  { id: "flashcards", icon: Layers, label: "Flashcards" },
+  { id: "stats", icon: BarChart3, label: "Statistics" },
 ];
 
 interface ShellProps {
@@ -24,12 +30,14 @@ interface ShellProps {
 }
 
 export default function Shell({ children }: ShellProps) {
-  const { activeModule, setActiveModule, isRunning, timeLeft } = useStore(
+  const { activeModule, setActiveModule, isRunning, timeLeft, theme, setTheme } = useStore(
     useShallow((s) => ({
       activeModule: s.activeModule,
       setActiveModule: s.setActiveModule,
       isRunning: s.isRunning,
       timeLeft: s.timeLeft,
+      theme: s.theme,
+      setTheme: s.setTheme,
     }))
   );
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -38,14 +46,14 @@ export default function Shell({ children }: ShellProps) {
   const secs = String(timeLeft % 60).padStart(2, "0");
 
   return (
-    <div className="flex h-screen bg-zinc-950 overflow-hidden">
+    <div className="flex h-screen bg-surface overflow-hidden">
       {/* Sidebar */}
-      <aside className="flex flex-col w-16 border-r border-zinc-800/50 bg-zinc-950 z-10">
+      <aside className="flex flex-col w-16 border-r border-border bg-surface z-10">
         {/* Logo */}
-        <div className="flex items-center justify-center h-16 border-b border-zinc-800/50">
+        <div className="flex items-center justify-center h-16 border-b border-border">
           <div className="relative flex items-center justify-center w-8 h-8">
-            <div className="absolute inset-0 rounded-lg bg-zinc-800/60" />
-            <Flame className="relative w-4 h-4 text-zinc-100" strokeWidth={2} />
+            <div className="absolute inset-0 rounded-lg bg-surface-hover" />
+            <Flame className="relative w-4 h-4 text-foreground" strokeWidth={2} />
           </div>
         </div>
 
@@ -62,8 +70,8 @@ export default function Shell({ children }: ShellProps) {
                   relative group flex items-center justify-center w-10 h-10 rounded-lg
                   transition-all duration-150
                   ${active
-                    ? "bg-zinc-100 text-zinc-950"
-                    : "text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800/60"
+                    ? "bg-foreground text-surface"
+                    : "text-muted hover:text-foreground hover:bg-surface-hover"
                   }
                 `}
               >
@@ -71,10 +79,10 @@ export default function Shell({ children }: ShellProps) {
 
                 {/* Tooltip */}
                 <span className="
-                  absolute left-12 px-2 py-1 bg-zinc-800 text-zinc-200 text-xs
+                  absolute left-12 px-2 py-1 bg-surface-elevated text-foreground text-xs
                   font-medium rounded-md whitespace-nowrap opacity-0 pointer-events-none
                   group-hover:opacity-100 transition-opacity duration-150
-                  border border-zinc-700/40
+                  border border-border
                 ">
                   {label}
                 </span>
@@ -90,14 +98,27 @@ export default function Shell({ children }: ShellProps) {
             animate={{ opacity: 1, scale: 1 }}
             onClick={() => setActiveModule("pomodoro")}
             className="mx-2 mb-2 flex items-center justify-center py-1.5 px-1
-                       bg-zinc-800/80 border border-zinc-700/50 rounded-lg
-                       text-xs font-mono text-zinc-300 hover:text-zinc-100
-                       hover:border-zinc-600/60 transition-all duration-150"
+                       bg-surface-hover border border-border rounded-lg
+                       text-xs font-mono text-foreground-secondary hover:text-foreground
+                       hover:border-border-active transition-all duration-150"
             title="Back to Focus"
           >
             {mins}:{secs}
           </motion.button>
         )}
+
+        {/* Theme toggle */}
+        <div className="flex flex-col items-center pb-2">
+          <button
+            onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+            title={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
+            className="flex items-center justify-center w-10 h-10 rounded-lg
+                       text-muted hover:text-foreground hover:bg-surface-hover
+                       transition-all duration-150"
+          >
+            {theme === "dark" ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+          </button>
+        </div>
 
         {/* Settings */}
         <div className="flex flex-col items-center pb-4">
@@ -105,7 +126,7 @@ export default function Shell({ children }: ShellProps) {
             onClick={() => setSettingsOpen(true)}
             title="Settings"
             className="flex items-center justify-center w-10 h-10 rounded-lg
-                       text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800/60
+                       text-muted hover:text-foreground hover:bg-surface-hover
                        transition-all duration-150"
           >
             <Settings className="w-4 h-4" />

@@ -1,0 +1,272 @@
+import { useMemo } from "react";
+import { Clock, Target, Flame, TrendingUp, Award } from "lucide-react";
+import { motion } from "framer-motion";
+import { useShallow } from "zustand/react/shallow";
+import { useStore } from "../../store/useStore";
+
+function formatDuration(seconds: number): string {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  if (h > 0) return `${h}h ${m}m`;
+  return `${m}m`;
+}
+
+function formatHours(seconds: number): string {
+  return (seconds / 3600).toFixed(1);
+}
+
+function todayStr(): string {
+  return new Date().toISOString().split("T")[0];
+}
+
+function getWeekStart(): string {
+  const d = new Date();
+  const day = d.getDay();
+  const diff = d.getDate() - day + (day === 0 ? -6 : 1); // Monday
+  const monday = new Date(d.setDate(diff));
+  return monday.toISOString().split("T")[0];
+}
+
+function getMonthStart(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`;
+}
+
+function getYearStart(): string {
+  return `${new Date().getFullYear()}-01-01`;
+}
+
+function getMotivationalQuote(progress: number): string {
+  if (progress >= 1.5) {
+    return "You're on fire! Way beyond your goal. This is legendary dedication.";
+  }
+  if (progress >= 1.2) {
+    return "Overtime! You've crushed your goal and kept going. True scholar energy.";
+  }
+  if (progress >= 1.0) {
+    return "Goal reached! You showed up and did the work. Take a well-earned rest.";
+  }
+  if (progress >= 0.75) {
+    return "Almost there! Just a few more hours and you've hit your weekly target.";
+  }
+  if (progress >= 0.5) {
+    return "Halfway through! Keep the momentum going, you're building something.";
+  }
+  if (progress >= 0.25) {
+    return "Good start! You've laid the foundation. Now keep stacking those hours.";
+  }
+  return "Every minute counts. Set a small goal for today and build from there.";
+}
+
+export default function StatsModule() {
+  const { focusSessions, weeklyGoalHours, setWeeklyGoalHours, sessionsCompleted } = useStore(
+    useShallow((s) => ({
+      focusSessions: s.focusSessions,
+      weeklyGoalHours: s.weeklyGoalHours,
+      setWeeklyGoalHours: s.setWeeklyGoalHours,
+      sessionsCompleted: s.sessionsCompleted,
+    }))
+  );
+
+  const today = todayStr();
+  const weekStart = getWeekStart();
+  const monthStart = getMonthStart();
+  const yearStart = getYearStart();
+
+  const stats = useMemo(() => {
+    const todaySession = focusSessions.find((f) => f.date === today);
+    const weekSessions = focusSessions.filter((f) => f.date >= weekStart);
+    const monthSessions = focusSessions.filter((f) => f.date >= monthStart);
+    const yearSessions = focusSessions.filter((f) => f.date >= yearStart);
+
+    const sum = (arr: typeof focusSessions) => arr.reduce((a, b) => a + b.duration, 0);
+    const sessSum = (arr: typeof focusSessions) => arr.reduce((a, b) => a + b.sessions, 0);
+
+    return {
+      today: { duration: todaySession?.duration ?? 0, sessions: todaySession?.sessions ?? 0 },
+      week: { duration: sum(weekSessions), sessions: sessSum(weekSessions) },
+      month: { duration: sum(monthSessions), sessions: sessSum(monthSessions) },
+      year: { duration: sum(yearSessions), sessions: sessSum(yearSessions) },
+      total: { duration: sum(focusSessions), sessions: sessSum(focusSessions) },
+      streak: calculateStreak(focusSessions),
+    };
+  }, [focusSessions, today, weekStart, monthStart, yearStart]);
+
+  const weeklyProgress = weeklyGoalHours > 0 ? stats.week.duration / (weeklyGoalHours * 3600) : 0;
+  const motivation = getMotivationalQuote(weeklyProgress);
+
+  // Last 7 days chart data
+  const last7Days = useMemo(() => {
+    const days: { label: string; duration: number }[] = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const dateStr = d.toISOString().split("T")[0];
+      const session = focusSessions.find((f) => f.date === dateStr);
+      days.push({
+        label: d.toLocaleDateString("en", { weekday: "short" }),
+        duration: session?.duration ?? 0,
+      });
+    }
+    return days;
+  }, [focusSessions]);
+
+  const maxDuration = Math.max(...last7Days.map((d) => d.duration), 1);
+
+  return (
+    <div className="flex flex-col h-full">
+      <header className="flex items-center justify-between px-6 py-4 border-b border-border flex-shrink-0">
+        <div>
+          <h1 className="text-sm font-semibold text-foreground">Statistics</h1>
+          <p className="text-xs text-muted mt-0.5">Track your focus and study habits</p>
+        </div>
+      </header>
+
+      <div className="flex-1 overflow-y-auto px-6 py-6">
+        <div className="max-w-3xl mx-auto space-y-6">
+
+          {/* Weekly Goal */}
+          <div className="surface p-6">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <Target className="w-4 h-4 text-foreground-secondary" />
+                <h2 className="text-sm font-semibold text-foreground">Weekly Goal</h2>
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  min={1}
+                  max={80}
+                  value={weeklyGoalHours}
+                  onChange={(e) => setWeeklyGoalHours(Math.max(1, Math.min(80, parseInt(e.target.value) || 20)))}
+                  className="input-base w-16 text-center text-sm font-mono"
+                />
+                <span className="text-xs text-muted">hours/week</span>
+              </div>
+            </div>
+
+            {/* Progress bar */}
+            <div className="relative h-4 bg-surface-hover rounded-full overflow-hidden mb-3">
+              <motion.div
+                initial={{ width: 0 }}
+                animate={{ width: `${Math.min(weeklyProgress * 100, 100)}%` }}
+                transition={{ duration: 0.8, ease: "easeOut" }}
+                className={`absolute inset-y-0 left-0 rounded-full ${
+                  weeklyProgress >= 1 ? "bg-green-500" : weeklyProgress >= 0.75 ? "bg-amber-500" : "bg-foreground"
+                }`}
+              />
+              {weeklyProgress > 1 && (
+                <motion.div
+                  initial={{ width: 0 }}
+                  animate={{ width: `${Math.min((weeklyProgress - 1) * 100, 100)}%` }}
+                  transition={{ duration: 0.8, ease: "easeOut", delay: 0.3 }}
+                  className="absolute inset-y-0 right-0 rounded-full bg-blue-500/40"
+                  style={{ left: "100%", marginLeft: "-100%" }}
+                />
+              )}
+            </div>
+
+            <div className="flex items-center justify-between mb-4">
+              <span className="text-sm text-foreground">
+                {formatHours(stats.week.duration)}h / {weeklyGoalHours}h
+              </span>
+              <span className="text-sm font-medium text-foreground-secondary">
+                {Math.round(weeklyProgress * 100)}%
+              </span>
+            </div>
+
+            {/* Motivational quote */}
+            <div className="p-3 bg-surface-hover rounded-lg">
+              <p className="text-sm text-foreground-secondary leading-relaxed">{motivation}</p>
+            </div>
+          </div>
+
+          {/* Stat cards */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            {[
+              { label: "Today", value: formatDuration(stats.today.duration), sub: `${stats.today.sessions} sessions`, icon: Clock },
+              { label: "This Week", value: formatDuration(stats.week.duration), sub: `${stats.week.sessions} sessions`, icon: TrendingUp },
+              { label: "This Month", value: formatDuration(stats.month.duration), sub: `${stats.month.sessions} sessions`, icon: Flame },
+              { label: "This Year", value: formatDuration(stats.year.duration), sub: `${stats.year.sessions} sessions`, icon: Award },
+            ].map(({ label, value, sub, icon: Icon }) => (
+              <div key={label} className="surface p-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <Icon className="w-3.5 h-3.5 text-muted" />
+                  <span className="text-xs font-medium text-muted uppercase tracking-wider">{label}</span>
+                </div>
+                <p className="text-xl font-semibold text-foreground">{value}</p>
+                <p className="text-xs text-muted mt-0.5">{sub}</p>
+              </div>
+            ))}
+          </div>
+
+          {/* 7-day chart */}
+          <div className="surface p-6">
+            <h2 className="text-sm font-semibold text-foreground mb-4">Last 7 Days</h2>
+            <div className="flex items-end gap-2 h-32">
+              {last7Days.map((day, i) => (
+                <div key={i} className="flex-1 flex flex-col items-center gap-1">
+                  <motion.div
+                    initial={{ height: 0 }}
+                    animate={{ height: `${(day.duration / maxDuration) * 100}%` }}
+                    transition={{ duration: 0.5, delay: i * 0.05 }}
+                    className={`w-full rounded-t-md min-h-[2px] ${
+                      day.duration > 0 ? "bg-foreground" : "bg-surface-hover"
+                    }`}
+                    style={{ maxHeight: "100%" }}
+                    title={formatDuration(day.duration)}
+                  />
+                  <span className="text-xs text-muted">{day.label}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Totals */}
+          <div className="surface p-6">
+            <h2 className="text-sm font-semibold text-foreground mb-2">All Time</h2>
+            <div className="flex items-center gap-6">
+              <div>
+                <p className="text-2xl font-semibold text-foreground">{formatDuration(stats.total.duration)}</p>
+                <p className="text-xs text-muted">total focus time</p>
+              </div>
+              <div>
+                <p className="text-2xl font-semibold text-foreground">{stats.total.sessions + sessionsCompleted}</p>
+                <p className="text-xs text-muted">sessions completed</p>
+              </div>
+              <div>
+                <p className="text-2xl font-semibold text-foreground">{stats.streak}</p>
+                <p className="text-xs text-muted">day streak</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function calculateStreak(sessions: { date: string; duration: number }[]): number {
+  if (sessions.length === 0) return 0;
+
+  const sorted = [...sessions].sort((a, b) => b.date.localeCompare(a.date));
+  let streak = 0;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  for (let i = 0; i < 365; i++) {
+    const checkDate = new Date(today);
+    checkDate.setDate(checkDate.getDate() - i);
+    const dateStr = checkDate.toISOString().split("T")[0];
+    const found = sorted.find((s) => s.date === dateStr && s.duration > 0);
+    if (found) {
+      streak++;
+    } else if (i === 0) {
+      // Today doesn't count if no sessions yet
+      continue;
+    } else {
+      break;
+    }
+  }
+  return streak;
+}

@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import { playChime } from "../lib/sound";
+import { playSound } from "../lib/sound";
 
 export type GroqModelId =
   | "llama-3.3-70b-versatile"
@@ -9,9 +9,13 @@ export type GroqModelId =
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
-export type Module = "calendar" | "pomodoro" | "notepad" | "tasks";
+export type Module = "calendar" | "pomodoro" | "notepad" | "tasks" | "flashcards" | "stats";
 
 export type PomodoroMode = "work" | "break" | "longBreak";
+
+export type Theme = "dark" | "light";
+
+export type SoundType = "bell" | "chime" | "gong" | "digital" | "none";
 
 export interface ChatMessage {
   role: "user" | "assistant";
@@ -27,6 +31,17 @@ export interface CalendarEvent {
   source: "local" | "ical";
   icalFeedId?: string;
   description?: string;
+  // Recurrence
+  recurrence?: RecurrenceRule;
+}
+
+export interface RecurrenceRule {
+  frequency: "daily" | "weekly" | "monthly";
+  interval: number;        // every N days/weeks/months
+  daysOfWeek?: number[];   // 0=Sun, 1=Mon, ..., 6=Sat (for weekly)
+  endType: "after" | "until" | "never";
+  endAfter?: number;       // occurrences
+  endUntil?: string;       // ISO date
 }
 
 export interface IcalFeed {
@@ -57,6 +72,39 @@ export interface Task {
   createdAt: string;
 }
 
+// ─── Flashcard Types ────────────────────────────────────────────────────────
+
+export interface Flashcard {
+  id: string;
+  deckId: string;
+  front: string;
+  back: string;
+  // Spaced repetition (SM-2 inspired)
+  interval: number;     // days until next review
+  easeFactor: number;   // starts at 2.5
+  repetitions: number;  // consecutive correct
+  nextReview: string;   // ISO date
+  createdAt: string;
+}
+
+export interface FlashcardDeck {
+  id: string;
+  name: string;
+  color: string;
+  createdAt: string;
+}
+
+export type ReviewRating = 0 | 1 | 2 | 3 | 4 | 5;
+// 0=again, 1=hard, 2=hard, 3=good, 4=easy, 5=perfect
+
+// ─── Focus Stats Types ─────────────────────────────────────────────────────
+
+export interface FocusSession {
+  date: string;        // ISO date (YYYY-MM-DD)
+  duration: number;    // seconds focused
+  sessions: number;    // pomodoro sessions completed
+}
+
 // ─── Store ───────────────────────────────────────────────────────────────────
 
 interface AppState {
@@ -64,9 +112,15 @@ interface AppState {
   activeModule: Module;
   apiKey: string;
   groqModel: GroqModelId;
+  theme: Theme;
+  soundType: SoundType;
+  soundVolume: number;
   setActiveModule: (m: Module) => void;
   setApiKey: (key: string) => void;
   setGroqModel: (model: GroqModelId) => void;
+  setTheme: (t: Theme) => void;
+  setSoundType: (s: SoundType) => void;
+  setSoundVolume: (v: number) => void;
 
   // ── Pomodoro ──────────────────────────────────────────────────────────────
   pomodoroMode: PomodoroMode;
@@ -81,6 +135,10 @@ interface AppState {
   chatMessages: ChatMessage[];
   isChatLoading: boolean;
   _intervalId: ReturnType<typeof setInterval> | null;
+
+  // Weekly goal
+  weeklyGoalHours: number;
+  setWeeklyGoalHours: (h: number) => void;
 
   startTimer: () => void;
   pauseTimer: () => void;
@@ -118,13 +176,14 @@ interface AppState {
   activeNoteId: string | null;
   isVimMode: boolean;
 
-  addNote: (parentId?: string | null) => void;
+  addNote: (parentId?: string | null) => string;
   addFolder: (parentId?: string | null) => void;
   updateNote: (id: string, patch: Partial<NoteFile>) => void;
   deleteNote: (id: string) => void;
   moveNote: (id: string, newParentId: string | null) => void;
   setActiveNote: (id: string | null) => void;
   toggleVimMode: () => void;
+  importNotes: (files: { name: string; content: string; parentKey: string | null; selfKey: string | null; isFolder: boolean }[]) => void;
 
   // ── Tasks ─────────────────────────────────────────────────────────────────
   tasks: Task[];
@@ -133,16 +192,30 @@ interface AppState {
   toggleTask: (id: string) => void;
   deleteTask: (id: string) => void;
   reorderTasks: (from: number, to: number) => void;
+
+  // ── Flashcards ────────────────────────────────────────────────────────────
+  flashcardDecks: FlashcardDeck[];
+  flashcards: Flashcard[];
+
+  addDeck: (name: string, color?: string) => void;
+  deleteDeck: (id: string) => void;
+  renameDeck: (id: string, name: string) => void;
+  addFlashcard: (deckId: string, front: string, back: string) => void;
+  updateFlashcard: (id: string, patch: Partial<Flashcard>) => void;
+  deleteFlashcard: (id: string) => void;
+  reviewFlashcard: (id: string, rating: ReviewRating) => void;
+
+  // ── Focus Stats ───────────────────────────────────────────────────────────
+  focusSessions: FocusSession[];
+  recordFocusTime: (seconds: number) => void;
 }
 
 function uid(): string {
   return Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
 }
 
-function modeTotal(state: AppState): number {
-  if (state.pomodoroMode === "work") return state.workDuration * 60;
-  if (state.pomodoroMode === "break") return state.breakDuration * 60;
-  return state.longBreakDuration * 60;
+function todayStr(): string {
+  return new Date().toISOString().split("T")[0];
 }
 
 export const useStore = create<AppState>()(
@@ -152,9 +225,15 @@ export const useStore = create<AppState>()(
       activeModule: "pomodoro",
       apiKey: "",
       groqModel: "llama-3.3-70b-versatile" as GroqModelId,
+      theme: "dark" as Theme,
+      soundType: "chime" as SoundType,
+      soundVolume: 0.45,
       setActiveModule: (activeModule) => set({ activeModule }),
       setApiKey: (apiKey) => set({ apiKey }),
       setGroqModel: (groqModel) => set({ groqModel }),
+      setTheme: (theme) => set({ theme }),
+      setSoundType: (soundType) => set({ soundType }),
+      setSoundVolume: (soundVolume) => set({ soundVolume }),
 
       // ── Pomodoro ────────────────────────────────────────────────────────
       pomodoroMode: "work",
@@ -170,6 +249,9 @@ export const useStore = create<AppState>()(
       isChatLoading: false,
       _intervalId: null,
 
+      weeklyGoalHours: 20,
+      setWeeklyGoalHours: (weeklyGoalHours) => set({ weeklyGoalHours }),
+
       startTimer: () => {
         const state = get();
         if (state.isRunning) return;
@@ -183,7 +265,13 @@ export const useStore = create<AppState>()(
 
           if (s.timeLeft <= 1) {
             clearInterval(id);
-            playChime();
+
+            // Record focus time
+            if (s.pomodoroMode === "work") {
+              s.recordFocusTime(s.workDuration * 60);
+            }
+
+            playSound(s.soundType, s.soundVolume);
 
             const sessions =
               s.pomodoroMode === "work"
@@ -319,7 +407,7 @@ export const useStore = create<AppState>()(
           id: "welcome",
           name: "Welcome to Hades",
           content:
-            "# Welcome to Hades\n\nThis is your note editor. It supports **Markdown** and _Vim_ bindings.\n\n## Features\n\n- Toggle between Normal and **Vim** mode in the toolbar\n- Organize notes in folders\n- Tag notes for quick search\n\n```js\nconsole.log('Hello, Hades');\n```\n",
+            "# Welcome to Hades\n\nThis is your note editor. It supports **Markdown** and _Vim_ bindings.\n\n## Features\n\n- Toggle between Normal and **Vim** mode in the toolbar\n- Organize notes in folders\n- Tag notes for quick search\n- Link notes with [[Note Name]] syntax\n\n```js\nconsole.log('Hello, Hades');\n```\n",
           tags: ["welcome"],
           parentId: null,
           isFolder: false,
@@ -348,6 +436,7 @@ export const useStore = create<AppState>()(
           ],
           activeNoteId: id,
         }));
+        return id;
       },
       addFolder: (parentId = null) => {
         const id = uid();
@@ -402,6 +491,59 @@ export const useStore = create<AppState>()(
       setActiveNote: (activeNoteId) => set({ activeNoteId }),
       toggleVimMode: () => set((s) => ({ isVimMode: !s.isVimMode })),
 
+      importNotes: (files) => {
+        set((s) => {
+          // Map from selfKey → generated id (for folder parent resolution)
+          const keyToId = new Map<string, string>();
+          const newNotes: NoteFile[] = [];
+
+          // First pass: create IDs for all folders so children can reference them
+          for (const f of files) {
+            if (f.isFolder && f.selfKey) {
+              keyToId.set(f.selfKey, uid());
+            }
+          }
+
+          // Second pass: create folder NoteFile entries
+          for (const f of files) {
+            if (f.isFolder && f.selfKey) {
+              const id = keyToId.get(f.selfKey)!;
+              const parentId = f.parentKey ? keyToId.get(f.parentKey) ?? null : null;
+              newNotes.push({
+                id,
+                name: f.name,
+                content: "",
+                tags: [],
+                parentId,
+                isFolder: true,
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+              });
+            }
+          }
+
+          // Third pass: create note entries
+          for (const f of files) {
+            if (!f.isFolder) {
+              const id = uid();
+              const parentId = f.parentKey ? keyToId.get(f.parentKey) ?? null : null;
+              newNotes.push({
+                id,
+                name: f.name,
+                content: f.content,
+                tags: [],
+                parentId,
+                isFolder: false,
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+              });
+            }
+          }
+
+          return { notes: [...s.notes, ...newNotes] };
+        });
+      },
+
       // ── Tasks ───────────────────────────────────────────────────────────
       tasks: [],
 
@@ -424,7 +566,7 @@ export const useStore = create<AppState>()(
           ),
         }));
         const task = get().tasks.find((t) => t.id === id);
-        if (task?.completed) playChime(0.35);
+        if (task?.completed) playSound(get().soundType, get().soundVolume * 0.7);
       },
       deleteTask: (id) =>
         set((s) => ({ tasks: s.tasks.filter((t) => t.id !== id) })),
@@ -435,6 +577,135 @@ export const useStore = create<AppState>()(
           tasks.splice(to, 0, item);
           return { tasks };
         }),
+
+      // ── Flashcards ────────────────────────────────────────────────────────
+      flashcardDecks: [],
+      flashcards: [],
+
+      addDeck: (name, color) => {
+        const id = uid();
+        set((s) => ({
+          flashcardDecks: [
+            ...s.flashcardDecks,
+            {
+              id,
+              name,
+              color: color ?? "#3f3f46",
+              createdAt: new Date().toISOString(),
+            },
+          ],
+        }));
+      },
+      deleteDeck: (id) =>
+        set((s) => ({
+          flashcardDecks: s.flashcardDecks.filter((d) => d.id !== id),
+          flashcards: s.flashcards.filter((c) => c.deckId !== id),
+        })),
+      renameDeck: (id, name) =>
+        set((s) => ({
+          flashcardDecks: s.flashcardDecks.map((d) =>
+            d.id === id ? { ...d, name } : d
+          ),
+        })),
+      addFlashcard: (deckId, front, back) => {
+        const id = uid();
+        set((s) => ({
+          flashcards: [
+            ...s.flashcards,
+            {
+              id,
+              deckId,
+              front,
+              back,
+              interval: 0,
+              easeFactor: 2.5,
+              repetitions: 0,
+              nextReview: todayStr(),
+              createdAt: new Date().toISOString(),
+            },
+          ],
+        }));
+      },
+      updateFlashcard: (id, patch) =>
+        set((s) => ({
+          flashcards: s.flashcards.map((c) =>
+            c.id === id ? { ...c, ...patch } : c
+          ),
+        })),
+      deleteFlashcard: (id) =>
+        set((s) => ({ flashcards: s.flashcards.filter((c) => c.id !== id) })),
+
+      reviewFlashcard: (id, rating) => {
+        set((s) => {
+          const card = s.flashcards.find((c) => c.id === id);
+          if (!card) return s;
+
+          let { interval, easeFactor, repetitions } = card;
+
+          if (rating < 3) {
+            // Failed — reset
+            repetitions = 0;
+            interval = 0;
+          } else {
+            repetitions += 1;
+            if (repetitions === 1) {
+              interval = 1;
+            } else if (repetitions === 2) {
+              interval = 6;
+            } else {
+              interval = Math.round(interval * easeFactor);
+            }
+          }
+
+          // Adjust ease factor (SM-2)
+          easeFactor = Math.max(
+            1.3,
+            easeFactor + (0.1 - (5 - rating) * (0.08 + (5 - rating) * 0.02))
+          );
+
+          const nextDate = new Date();
+          nextDate.setDate(nextDate.getDate() + Math.max(interval, 1));
+
+          return {
+            flashcards: s.flashcards.map((c) =>
+              c.id === id
+                ? {
+                    ...c,
+                    interval,
+                    easeFactor,
+                    repetitions,
+                    nextReview: nextDate.toISOString().split("T")[0],
+                  }
+                : c
+            ),
+          };
+        });
+      },
+
+      // ── Focus Stats ───────────────────────────────────────────────────────
+      focusSessions: [],
+
+      recordFocusTime: (seconds) => {
+        const today = todayStr();
+        set((s) => {
+          const existing = s.focusSessions.find((f) => f.date === today);
+          if (existing) {
+            return {
+              focusSessions: s.focusSessions.map((f) =>
+                f.date === today
+                  ? { ...f, duration: f.duration + seconds, sessions: f.sessions + 1 }
+                  : f
+              ),
+            };
+          }
+          return {
+            focusSessions: [
+              ...s.focusSessions,
+              { date: today, duration: seconds, sessions: 1 },
+            ],
+          };
+        });
+      },
     }),
     {
       name: "hades-store",

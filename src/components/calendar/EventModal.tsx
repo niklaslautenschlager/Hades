@@ -1,9 +1,9 @@
 import { useState, useRef } from "react";
-import { X, Trash2, ChevronUp, ChevronDown } from "lucide-react";
+import { X, Trash2, ChevronUp, ChevronDown, Repeat } from "lucide-react";
 import { motion } from "framer-motion";
-import { format, parseISO, addHours } from "date-fns";
+import { format, parseISO, addHours, addDays, addWeeks, addMonths } from "date-fns";
 import { useShallow } from "zustand/react/shallow";
-import { useStore, type CalendarEvent } from "../../store/useStore";
+import { useStore, type CalendarEvent, type RecurrenceRule } from "../../store/useStore";
 
 interface Props {
   event?: CalendarEvent;
@@ -14,6 +14,8 @@ interface Props {
 const COLORS = [
   "#3f3f46", "#6b7280", "#9ca3af", "#d1d5db", "#374151", "#1f2937",
 ];
+
+const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 // Single draggable number field (hours or minutes)
 function DragSegment({
@@ -47,16 +49,15 @@ function DragSegment({
       onPointerUp={() => { startRef.current = null; }}
       onPointerCancel={() => { startRef.current = null; }}
     >
-      <ChevronUp className="w-3 h-3 text-zinc-700 group-hover/seg:text-zinc-400 transition-colors" />
-      <span className="font-mono text-sm text-zinc-200 w-6 text-center leading-snug py-px">
+      <ChevronUp className="w-3 h-3 text-muted group-hover/seg:text-foreground-secondary transition-colors" />
+      <span className="font-mono text-sm text-foreground w-6 text-center leading-snug py-px">
         {String(value).padStart(2, "0")}
       </span>
-      <ChevronDown className="w-3 h-3 text-zinc-700 group-hover/seg:text-zinc-400 transition-colors" />
+      <ChevronDown className="w-3 h-3 text-muted group-hover/seg:text-foreground-secondary transition-colors" />
     </div>
   );
 }
 
-// Parses "yyyy-MM-ddTHH:mm" into parts
 function parseDT(s: string) {
   const [date, time] = s.split("T");
   const [h, m] = (time ?? "00:00").split(":").map(Number);
@@ -80,24 +81,139 @@ function DateTimePicker({
 
   return (
     <div>
-      <label className="block text-xs text-zinc-500 mb-1.5">{label}</label>
-      <div className="flex items-center gap-2 bg-zinc-950 border border-zinc-800/70 rounded-lg
-                      px-3 py-1.5 focus-within:border-zinc-700/60 transition-colors">
+      <label className="block text-xs text-muted mb-1.5">{label}</label>
+      <div className="flex items-center gap-2 bg-input border border-input-border rounded-lg
+                      px-3 py-1.5 focus-within:border-border-active transition-colors">
         <input
           type="date"
           value={date}
           onChange={(e) => onChange(buildDT(e.target.value, h, m))}
-          className="bg-transparent text-xs text-zinc-300 outline-none [color-scheme:dark] flex-1 min-w-0"
+          className="bg-transparent text-xs text-foreground-secondary outline-none [color-scheme:dark] flex-1 min-w-0"
         />
-        <span className="text-zinc-700 text-xs select-none">|</span>
+        <span className="text-muted text-xs select-none">|</span>
         <DragSegment value={h} max={23} onChange={(v) => onChange(buildDT(date, v, m))} />
-        <span className="text-zinc-600 font-mono text-xs select-none">:</span>
+        <span className="text-muted font-mono text-xs select-none">:</span>
         <DragSegment value={m} max={55} step={5} onChange={(v) => onChange(buildDT(date, h, v))} />
       </div>
-      <p className="text-xs text-zinc-700 mt-1">Drag ↕ on hour or minute to change</p>
+      <p className="text-xs text-muted mt-1">Drag on hour or minute to change</p>
     </div>
   );
 }
+
+// ─── Recurrence Editor ───────────────────────────────────────────────────────
+
+function RecurrenceEditor({
+  rule,
+  onChange,
+  onRemove,
+}: {
+  rule: RecurrenceRule;
+  onChange: (r: RecurrenceRule) => void;
+  onRemove: () => void;
+}) {
+  return (
+    <div className="space-y-3 p-3 bg-surface-hover rounded-lg border border-border">
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-medium text-foreground-secondary flex items-center gap-1.5">
+          <Repeat className="w-3 h-3" />
+          Repeat
+        </span>
+        <button onClick={onRemove} className="text-xs text-muted hover:text-red-400 transition-colors">
+          Remove
+        </button>
+      </div>
+
+      {/* Frequency + interval */}
+      <div className="flex items-center gap-2">
+        <span className="text-xs text-muted">Every</span>
+        <input
+          type="number"
+          min={1}
+          max={52}
+          value={rule.interval}
+          onChange={(e) => onChange({ ...rule, interval: Math.max(1, parseInt(e.target.value) || 1) })}
+          className="input-base w-14 text-center text-xs"
+        />
+        <select
+          value={rule.frequency}
+          onChange={(e) => onChange({ ...rule, frequency: e.target.value as RecurrenceRule["frequency"] })}
+          className="input-base w-auto text-xs"
+        >
+          <option value="daily">day(s)</option>
+          <option value="weekly">week(s)</option>
+          <option value="monthly">month(s)</option>
+        </select>
+      </div>
+
+      {/* Days of week (for weekly) */}
+      {rule.frequency === "weekly" && (
+        <div className="flex items-center gap-1">
+          {DAY_NAMES.map((name, i) => {
+            const active = rule.daysOfWeek?.includes(i);
+            return (
+              <button
+                key={i}
+                onClick={() => {
+                  const days = new Set(rule.daysOfWeek ?? []);
+                  if (active) days.delete(i);
+                  else days.add(i);
+                  onChange({ ...rule, daysOfWeek: Array.from(days).sort() });
+                }}
+                className={`w-8 h-8 rounded-md text-xs font-medium transition-all
+                           ${active
+                             ? "bg-foreground text-surface"
+                             : "bg-surface-hover text-muted hover:text-foreground-secondary"
+                           }`}
+              >
+                {name.slice(0, 2)}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {/* End condition */}
+      <div className="flex items-center gap-2">
+        <span className="text-xs text-muted">Ends</span>
+        <select
+          value={rule.endType}
+          onChange={(e) => onChange({ ...rule, endType: e.target.value as RecurrenceRule["endType"] })}
+          className="input-base w-auto text-xs"
+        >
+          <option value="never">Never</option>
+          <option value="after">After N occurrences</option>
+          <option value="until">Until date</option>
+        </select>
+      </div>
+
+      {rule.endType === "after" && (
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-muted">After</span>
+          <input
+            type="number"
+            min={1}
+            max={365}
+            value={rule.endAfter ?? 4}
+            onChange={(e) => onChange({ ...rule, endAfter: Math.max(1, parseInt(e.target.value) || 4) })}
+            className="input-base w-16 text-center text-xs"
+          />
+          <span className="text-xs text-muted">times</span>
+        </div>
+      )}
+
+      {rule.endType === "until" && (
+        <input
+          type="date"
+          value={rule.endUntil ?? ""}
+          onChange={(e) => onChange({ ...rule, endUntil: e.target.value })}
+          className="input-base text-xs [color-scheme:dark]"
+        />
+      )}
+    </div>
+  );
+}
+
+// ─── Main Modal ──────────────────────────────────────────────────────────────
 
 export default function EventModal({ event, defaultDate, onClose }: Props) {
   const { addCalendarEvent, updateCalendarEvent, deleteCalendarEvent } = useStore(
@@ -124,21 +240,89 @@ export default function EventModal({ event, defaultDate, onClose }: Props) {
   );
   const [color, setColor] = useState(event?.color ?? COLORS[0]);
   const [description, setDescription] = useState(event?.description ?? "");
+  const [recurrence, setRecurrence] = useState<RecurrenceRule | null>(event?.recurrence ?? null);
+
+  function generateRecurringEvents(basePayload: Omit<CalendarEvent, "id">, rule: RecurrenceRule) {
+    const events: Omit<CalendarEvent, "id">[] = [];
+    const startDate = new Date(basePayload.start);
+    const endDate = new Date(basePayload.end);
+    const duration = endDate.getTime() - startDate.getTime();
+
+    let maxOccurrences = rule.endType === "after" ? (rule.endAfter ?? 4) : 100;
+    const untilDate = rule.endType === "until" && rule.endUntil ? new Date(rule.endUntil) : null;
+
+    let current = new Date(startDate);
+    let count = 0;
+
+    while (count < maxOccurrences) {
+      if (untilDate && current > untilDate) break;
+
+      // For weekly with specific days
+      if (rule.frequency === "weekly" && rule.daysOfWeek && rule.daysOfWeek.length > 0) {
+        const weekStart = new Date(current);
+        for (const dayOfWeek of rule.daysOfWeek) {
+          const candidate = new Date(weekStart);
+          const diff = dayOfWeek - candidate.getDay();
+          candidate.setDate(candidate.getDate() + diff);
+          if (candidate >= startDate && (!untilDate || candidate <= untilDate) && count < maxOccurrences) {
+            const eventEnd = new Date(candidate.getTime() + duration);
+            events.push({
+              ...basePayload,
+              start: candidate.toISOString(),
+              end: eventEnd.toISOString(),
+            });
+            count++;
+          }
+        }
+        // Move to next interval
+        current = addWeeks(current, rule.interval);
+      } else {
+        const eventEnd = new Date(current.getTime() + duration);
+        events.push({
+          ...basePayload,
+          start: current.toISOString(),
+          end: eventEnd.toISOString(),
+        });
+        count++;
+
+        // Advance
+        switch (rule.frequency) {
+          case "daily":
+            current = addDays(current, rule.interval);
+            break;
+          case "weekly":
+            current = addWeeks(current, rule.interval);
+            break;
+          case "monthly":
+            current = addMonths(current, rule.interval);
+            break;
+        }
+      }
+    }
+
+    return events;
+  }
 
   function handleSubmit() {
     if (!title.trim()) return;
-    const payload = {
+    const basePayload = {
       title: title.trim(),
       start: new Date(start).toISOString(),
       end: new Date(end).toISOString(),
       color,
       description,
       source: "local" as const,
+      recurrence: recurrence ?? undefined,
     };
+
     if (event) {
-      updateCalendarEvent(event.id, payload);
+      updateCalendarEvent(event.id, basePayload);
+    } else if (recurrence) {
+      // Generate recurring events
+      const events = generateRecurringEvents(basePayload, recurrence);
+      events.forEach((ev) => addCalendarEvent(ev));
     } else {
-      addCalendarEvent(payload);
+      addCalendarEvent(basePayload);
     }
     onClose();
   }
@@ -160,12 +344,12 @@ export default function EventModal({ event, defaultDate, onClose }: Props) {
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.96, y: 8 }}
         transition={{ type: "spring", stiffness: 400, damping: 30 }}
-        className="w-full max-w-md bg-zinc-900 border border-zinc-800/60 rounded-2xl shadow-2xl p-6"
+        className="w-full max-w-md surface p-6 max-h-[90vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
         <div className="flex items-center justify-between mb-5">
-          <h2 className="text-base font-semibold text-zinc-100">
+          <h2 className="text-base font-semibold text-foreground">
             {event ? "Edit event" : "New event"}
           </h2>
           <button onClick={onClose} className="btn-ghost !p-1.5">
@@ -190,7 +374,7 @@ export default function EventModal({ event, defaultDate, onClose }: Props) {
           <DateTimePicker value={end} onChange={setEnd} label="End" />
 
           <div>
-            <label className="block text-xs text-zinc-500 mb-2">Color</label>
+            <label className="block text-xs text-muted mb-2">Color</label>
             <div className="flex items-center gap-2">
               {COLORS.map((c) => (
                 <button
@@ -198,7 +382,7 @@ export default function EventModal({ event, defaultDate, onClose }: Props) {
                   onClick={() => setColor(c)}
                   className={`w-6 h-6 rounded-full transition-all duration-150
                               ${color === c
-                                ? "ring-2 ring-offset-2 ring-offset-zinc-900 ring-zinc-300"
+                                ? "ring-2 ring-offset-2 ring-offset-[var(--color-surface)] ring-foreground"
                                 : ""
                               }`}
                   style={{ backgroundColor: c }}
@@ -207,8 +391,34 @@ export default function EventModal({ event, defaultDate, onClose }: Props) {
             </div>
           </div>
 
+          {/* Recurrence */}
+          {recurrence ? (
+            <RecurrenceEditor
+              rule={recurrence}
+              onChange={setRecurrence}
+              onRemove={() => setRecurrence(null)}
+            />
+          ) : (
+            <button
+              onClick={() =>
+                setRecurrence({
+                  frequency: "weekly",
+                  interval: 1,
+                  daysOfWeek: [new Date(start).getDay()],
+                  endType: "after",
+                  endAfter: 4,
+                })
+              }
+              className="flex items-center gap-2 w-full px-3 py-2.5 rounded-lg border border-dashed border-border
+                         text-sm text-muted hover:text-foreground-secondary hover:border-border-active transition-all"
+            >
+              <Repeat className="w-3.5 h-3.5" />
+              Add recurrence
+            </button>
+          )}
+
           <div>
-            <label className="block text-xs text-zinc-500 mb-1">Description</label>
+            <label className="block text-xs text-muted mb-1">Description</label>
             <textarea
               value={description}
               onChange={(e) => setDescription(e.target.value)}
@@ -219,12 +429,12 @@ export default function EventModal({ event, defaultDate, onClose }: Props) {
           </div>
         </div>
 
-        <div className="flex items-center justify-between mt-5 pt-4 border-t border-zinc-800/50">
+        <div className="flex items-center justify-between mt-5 pt-4 border-t border-border">
           <div>
             {event && (
               <button
                 onClick={handleDelete}
-                className="flex items-center gap-1.5 btn-ghost text-zinc-600 hover:text-red-400"
+                className="flex items-center gap-1.5 btn-ghost text-muted hover:text-red-400"
               >
                 <Trash2 className="w-3.5 h-3.5" />
                 Delete
@@ -238,7 +448,7 @@ export default function EventModal({ event, defaultDate, onClose }: Props) {
               disabled={!title.trim()}
               className="btn-primary"
             >
-              {event ? "Update" : "Create"}
+              {event ? "Update" : recurrence ? "Create All" : "Create"}
             </button>
           </div>
         </div>

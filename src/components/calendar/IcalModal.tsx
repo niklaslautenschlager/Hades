@@ -60,13 +60,13 @@ export default function IcalModal({ onClose }: Props) {
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.96, y: 8 }}
         transition={{ type: "spring", stiffness: 400, damping: 30 }}
-        className="w-full max-w-lg bg-zinc-900 border border-zinc-800/60 rounded-2xl shadow-2xl p-6"
+        className="w-full max-w-lg surface p-6"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between mb-5">
           <div className="flex items-center gap-2">
-            <Rss className="w-4 h-4 text-zinc-400" />
-            <h2 className="text-base font-semibold text-zinc-100">Calendar Feeds</h2>
+            <Rss className="w-4 h-4 text-foreground-secondary" />
+            <h2 className="text-base font-semibold text-foreground">Calendar Feeds</h2>
           </div>
           <button onClick={onClose} className="btn-ghost !p-1.5">
             <X className="w-4 h-4" />
@@ -74,7 +74,7 @@ export default function IcalModal({ onClose }: Props) {
         </div>
 
         {/* Add feed form */}
-        <div className="space-y-2 mb-5 pb-5 border-b border-zinc-800/50">
+        <div className="space-y-2 mb-5 pb-5 border-b border-border">
           <div className="flex gap-2">
             <input
               type="text"
@@ -87,7 +87,7 @@ export default function IcalModal({ onClose }: Props) {
               type="color"
               value={color}
               onChange={(e) => setColor(e.target.value)}
-              className="w-10 h-10 rounded-lg border border-zinc-800 bg-zinc-900 cursor-pointer p-1"
+              className="w-10 h-10 rounded-lg border border-border bg-surface-elevated cursor-pointer p-1"
             />
           </div>
           <div className="flex gap-2">
@@ -113,32 +113,32 @@ export default function IcalModal({ onClose }: Props) {
         {/* Feeds list */}
         <div className="space-y-2 max-h-72 overflow-y-auto">
           {icalFeeds.length === 0 && (
-            <p className="text-sm text-zinc-600 text-center py-4">
+            <p className="text-sm text-muted text-center py-4">
               No feeds added yet. Subscribe to an .ics URL above.
             </p>
           )}
           {icalFeeds.map((feed) => (
             <div
               key={feed.id}
-              className="flex items-center gap-3 p-3 bg-zinc-800/30 border border-zinc-800/50 rounded-xl"
+              className="flex items-center gap-3 p-3 surface"
             >
               <div className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: feed.color }} />
 
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
-                  <span className="text-sm font-medium text-zinc-200 truncate">{feed.name}</span>
+                  <span className="text-sm font-medium text-foreground truncate">{feed.name}</span>
                   <button
                     onClick={() => toggleIcalFeed(feed.id)}
                     className={`text-xs px-1.5 py-0.5 rounded font-medium transition-all ${
                       feed.enabled
-                        ? "bg-zinc-700/50 text-zinc-300"
-                        : "bg-zinc-800/50 text-zinc-600"
+                        ? "bg-surface-hover text-foreground-secondary"
+                        : "bg-surface-hover text-muted"
                     }`}
                   >
                     {feed.enabled ? "on" : "off"}
                   </button>
                 </div>
-                <p className="text-xs text-zinc-600 truncate font-mono">{feed.url}</p>
+                <p className="text-xs text-muted truncate font-mono">{feed.url}</p>
                 {errors[feed.id] && (
                   <p className="text-xs text-red-400/80 mt-0.5">{errors[feed.id]}</p>
                 )}
@@ -149,7 +149,7 @@ export default function IcalModal({ onClose }: Props) {
                   onClick={() => handleSync(feed.id)}
                   disabled={syncing[feed.id]}
                   className="flex items-center justify-center w-7 h-7 rounded-lg
-                             text-zinc-500 hover:text-zinc-200 hover:bg-zinc-700/50 transition-all"
+                             text-muted hover:text-foreground hover:bg-surface-hover transition-all"
                   title="Sync now"
                 >
                   {syncing[feed.id] ? (
@@ -161,7 +161,7 @@ export default function IcalModal({ onClose }: Props) {
                 <button
                   onClick={() => removeIcalFeed(feed.id)}
                   className="flex items-center justify-center w-7 h-7 rounded-lg
-                             text-zinc-600 hover:text-red-400 hover:bg-zinc-700/50 transition-all"
+                             text-muted hover:text-red-400 hover:bg-surface-hover transition-all"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
                 </button>
