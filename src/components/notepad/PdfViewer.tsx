@@ -2,25 +2,31 @@ import { useState, useRef, useEffect } from "react";
 import { Upload, X, FileText } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { readFile } from "@tauri-apps/plugin-fs";
+import { useShallow } from "zustand/react/shallow";
+import { useStore } from "../../store/useStore";
 
 interface Props {
   onClose: () => void;
 }
 
 export default function PdfViewer({ onClose }: Props) {
-  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
-  const [fileName, setFileName] = useState<string>("");
+  const { pdfUrl, fileName, setNotePdf } = useStore(
+    useShallow((s) => ({
+      pdfUrl: s.notePdfUrl,
+      fileName: s.notePdfFileName,
+      setNotePdf: s.setNotePdf,
+    }))
+  );
+
   const [isDragOver, setIsDragOver] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   function loadFromBlob(blob: Blob, name: string) {
     if (pdfUrl) URL.revokeObjectURL(pdfUrl);
     const url = URL.createObjectURL(blob);
-    setPdfUrl(url);
-    setFileName(name);
+    setNotePdf(url, name);
   }
 
-  // Use Tauri's native drag-drop event (works on all platforms)
   useEffect(() => {
     let unlisten: (() => void) | null = null;
 
@@ -32,20 +38,14 @@ export default function PdfViewer({ onClose }: Props) {
           setIsDragOver(false);
           const paths = event.payload.paths;
           const pdfPath = paths.find((p: string) => p.toLowerCase().endsWith(".pdf"));
-          if (pdfPath) {
-            loadPdfFromPath(pdfPath);
-          }
+          if (pdfPath) loadPdfFromPath(pdfPath);
         } else if (event.payload.type === "leave") {
           setIsDragOver(false);
         }
       })
-      .then((fn) => {
-        unlisten = fn;
-      });
+      .then((fn) => { unlisten = fn; });
 
-    return () => {
-      unlisten?.();
-    };
+    return () => { unlisten?.(); };
   }, []);
 
   async function loadPdfFromPath(filePath: string) {
@@ -68,8 +68,7 @@ export default function PdfViewer({ onClose }: Props) {
 
   function handleClear() {
     if (pdfUrl) URL.revokeObjectURL(pdfUrl);
-    setPdfUrl(null);
-    setFileName("");
+    setNotePdf(null, "");
   }
 
   return (

@@ -178,6 +178,9 @@ interface AppState {
   activeNoteId: string | null;
   isVimMode: boolean;
   showNotepadPdf: boolean;
+  notePdfUrl: string | null;
+  notePdfFileName: string;
+  setNotePdf: (url: string | null, fileName: string) => void;
 
   addNote: (parentId?: string | null) => string;
   addFolder: (parentId?: string | null) => void;
@@ -453,6 +456,10 @@ export const useStore = create<AppState>()(
         })),
 
       // ── Notes ───────────────────────────────────────────────────────────
+      notePdfUrl: null,
+      notePdfFileName: "",
+      setNotePdf: (url, fileName) => set({ notePdfUrl: url, notePdfFileName: fileName }),
+
       notes: [
         {
           id: "welcome",
@@ -774,6 +781,8 @@ export const useStore = create<AppState>()(
         isRunning: false,
         _intervalId: null,
         isChatLoading: false,
+        notePdfUrl: null,
+        notePdfFileName: "",
       }),
     }
   )

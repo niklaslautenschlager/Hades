@@ -4,7 +4,7 @@ import { EditorState, Compartment } from "@codemirror/state";
 import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
 import { closeBrackets, closeBracketsKeymap } from "@codemirror/autocomplete";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
-import { syntaxHighlighting, defaultHighlightStyle } from "@codemirror/language";
+import { syntaxHighlighting, defaultHighlightStyle, indentUnit } from "@codemirror/language";
 import { vim } from "@replit/codemirror-vim";
 import { useStore } from "../../store/useStore";
 
@@ -50,6 +50,11 @@ export default function Editor({ noteId, content, onChange }: Props) {
         ".cm-content": {
           padding: "24px 32px",
           minHeight: "100%",
+          caretColor: "var(--color-foreground)",
+        },
+        ".cm-cursor, .cm-dropCursor": {
+          borderLeftColor: "var(--color-foreground)",
+          borderLeftWidth: "2px",
         },
         ".cm-focused": { outline: "none" },
       });
@@ -67,6 +72,7 @@ export default function Editor({ noteId, content, onChange }: Props) {
           history(),
           closeBrackets(),
           keymap.of([indentWithTab, ...closeBracketsKeymap, ...defaultKeymap, ...historyKeymap]),
+          indentUnit.of("   "),
           markdown({ base: markdownLanguage }),
           syntaxHighlighting(defaultHighlightStyle),
           lineNumbers(),
