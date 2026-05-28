@@ -26,6 +26,7 @@ Built with [Tauri 2](https://v2.tauri.app) for native performance on macOS, Linu
 - Export to Markdown (.md) or HTML
 - Import from Obsidian vaults (preserves folder structure)
 - Collapsible file tree sidebar
+- **Cloud sync** — auto-saves notes as `.md` files to any local folder synced by Google Drive, iCloud Drive, Nextcloud, Syncthing, Dropbox, or OneDrive. Bidirectional merge on startup, 5-minute auto-save, quit guard. See [Cloud Sync Setup](docs/cloud-sync.md).
 
 ### Calendar
 - Month, week, and day views
@@ -53,7 +54,7 @@ Built with [Tauri 2](https://v2.tauri.app) for native performance on macOS, Linu
 - All-time totals
 
 ### General
-- Dark and light theme (warm paper-white light mode)
+- Five themes: Zinc Dark, Paper (light), Catppuccin Mocha, Gruvbox, Nord
 - Persistent state via Zustand + Tauri Store
 - Native window controls and system tray
 - Resizable panels throughout
@@ -107,6 +108,14 @@ The AI study assistant requires a free [Groq API key](https://console.groq.com/)
 2. Generate an API key
 3. Open Hades Settings and paste your key
 
+### Cloud Sync Setup
+
+Hades can sync your notes to any cloud storage provider by writing them as plain `.md` files to a local folder managed by your cloud client (Google Drive for Desktop, iCloud Drive, Nextcloud, Syncthing, Dropbox, etc.).
+
+Enable it in **Settings → Cloud Sync**, pick your sync folder, and Hades handles the rest — auto-saving every 5 minutes and merging changes from other devices on startup.
+
+For detailed per-provider setup instructions on Linux, macOS, and Windows see **[docs/cloud-sync.md](docs/cloud-sync.md)**.
+
 ## Project Structure
 
 ```
@@ -121,11 +130,16 @@ src/
     stats/          # Focus statistics, charts, weekly goal
     tasks/          # Task list
   lib/
-    ai.ts           # AI command system and Groq streaming
+    ai.ts           # AI command system and multi-vendor streaming
     ical.ts         # iCal feed parsing
     noteExport.ts   # Markdown and HTML export via Tauri dialog
-    noteImport.ts   # Obsidian vault import
+    noteImport.ts   # Obsidian vault import (native folder picker)
+    noteSync.ts     # Cloud sync engine (read/write .md files with frontmatter)
     sound.ts        # Web Audio API notification sounds
+  hooks/
+    useSyncTimer.ts    # 5-minute auto-save timer
+    useStartupSync.ts  # Bidirectional merge on app open
+    useQuitGuard.ts    # Intercepts window close if unsaved changes exist
   store/
     useStore.ts     # Global Zustand store
   styles/
