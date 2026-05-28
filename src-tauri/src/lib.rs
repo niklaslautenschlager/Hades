@@ -214,6 +214,75 @@ async fn chat_anthropic(
     Ok(())
 }
 
+// ─── Updater commands ─────────────────────────────────────────────────────────
+
+#[tauri::command]
+async fn install_update(download_url: String) -> Result<(), String> {
+    use std::io::Write;
+
+    // Only allow downloads from GitHub to prevent open redirects
+    if !download_url.starts_with("https://github.com/")
+        && !download_url.starts_with("https://objects.githubusercontent.com/")
+    {
+        return Err("Download URL must originate from github.com".to_string());
+    }
+
+    let client = reqwest::Client::builder()
+        .user_agent("HadesApp/1.0")
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    let response = client
+        .get(&download_url)
+        .send()
+        .await
+        .map_err(|e| format!("Download failed: {}", e))?;
+
+    if !response.status().is_success() {
+        return Err(format!("Server returned {}", response.status()));
+    }
+
+    let bytes = response
+        .bytes()
+        .await
+        .map_err(|e| format!("Failed to read download: {}", e))?;
+
+    let current_exe = std::env::current_exe()
+        .map_err(|e| format!("Cannot locate current executable: {}", e))?;
+
+    // Write to a sibling temp file so rename() is atomic (same filesystem)
+    let tmp = current_exe.with_extension("new");
+
+    {
+        let mut f = std::fs::File::create(&tmp)
+            .map_err(|e| format!("Cannot create temp file: {}", e))?;
+        f.write_all(&bytes)
+            .map_err(|e| format!("Cannot write temp file: {}", e))?;
+    }
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = std::fs::metadata(&tmp)
+            .map_err(|e| e.to_string())?
+            .permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&tmp, perms)
+            .map_err(|e| format!("Cannot set executable bit: {}", e))?;
+    }
+
+    // Atomic replace — the running process keeps its inode; the dir entry is updated
+    std::fs::rename(&tmp, &current_exe)
+        .map_err(|e| format!("Cannot replace binary: {}", e))?;
+
+    Ok(())
+}
+
+#[tauri::command]
+fn restart_app(app: tauri::AppHandle) {
+    app.restart();
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Force X11 backend before GTK initialises to avoid Wayland protocol errors
@@ -238,7 +307,13 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
-        .invoke_handler(tauri::generate_handler![fetch_ical, chat_groq, chat_completion])
+        .invoke_handler(tauri::generate_handler![
+            fetch_ical,
+            chat_groq,
+            chat_completion,
+            install_update,
+            restart_app,
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

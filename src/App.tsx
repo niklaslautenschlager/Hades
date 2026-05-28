@@ -9,6 +9,7 @@ import SyncOverlay from "./components/SyncOverlay";
 import { useSyncTimer } from "./hooks/useSyncTimer";
 import { useStartupSync } from "./hooks/useStartupSync";
 import { useQuitGuard } from "./hooks/useQuitGuard";
+import { useUpdateCheck } from "./hooks/useUpdateCheck";
 
 // Lazy-load heavy modules
 const NotepadModule = lazy(() => import("./components/notepad/NotepadModule"));
@@ -28,6 +29,7 @@ export default function App() {
   useSyncTimer();
   useStartupSync();
   useQuitGuard();
+  useUpdateCheck();
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);

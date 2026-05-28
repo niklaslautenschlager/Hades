@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { X, Key, Timer, Eye, EyeOff, Cpu, Volume2, Play, Palette, CalendarClock, Sliders, Cloud, FolderOpen, CloudOff, RefreshCw } from "lucide-react";
+import { X, Key, Timer, Eye, EyeOff, Cpu, Volume2, Play, Palette, CalendarClock, Sliders, Cloud, FolderOpen, CloudOff, RefreshCw, Download, RotateCw, ArrowUpCircle } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useShallow } from "zustand/react/shallow";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -7,6 +7,7 @@ import { useStore, type SoundType, type Theme, type AIVendor } from "../../store
 import { AI_MODELS, VENDOR_LABELS, VENDOR_KEY_URLS } from "../../lib/ai";
 import { previewSound } from "../../lib/sound";
 import { syncDirtyNotes } from "../../lib/noteSync";
+import { installUpdate, restartApp } from "../../lib/updater";
 
 interface Props {
   onClose: () => void;
@@ -66,6 +67,16 @@ export default function SettingsModal({ onClose }: Props) {
     setHasPendingChanges,
     setSyncError,
     notes,
+    updateAvailable,
+    updateVersion,
+    updateChangelog,
+    updateAssetUrl,
+    isUpdating,
+    updateInstalled,
+    updateError,
+    setIsUpdating,
+    setUpdateInstalled,
+    setUpdateError,
   } = useStore(
     useShallow((s) => ({
       workDuration: s.workDuration,
@@ -102,6 +113,16 @@ export default function SettingsModal({ onClose }: Props) {
       setHasPendingChanges: s.setHasPendingChanges,
       setSyncError:         s.setSyncError,
       notes:                s.notes,
+      updateAvailable:      s.updateAvailable,
+      updateVersion:        s.updateVersion,
+      updateChangelog:      s.updateChangelog,
+      updateAssetUrl:       s.updateAssetUrl,
+      isUpdating:           s.isUpdating,
+      updateInstalled:      s.updateInstalled,
+      updateError:          s.updateError,
+      setIsUpdating:        s.setIsUpdating,
+      setUpdateInstalled:   s.setUpdateInstalled,
+      setUpdateError:       s.setUpdateError,
     }))
   );
 
@@ -184,6 +205,67 @@ export default function SettingsModal({ onClose }: Props) {
           </div>
 
           <div className="space-y-6">
+            {/* Update (shown only when available) */}
+            {updateAvailable && (
+              <section className="rounded-xl border border-border-active bg-surface-hover px-4 py-3">
+                <div className="flex items-center gap-2 mb-2">
+                  <ArrowUpCircle className="w-3.5 h-3.5 text-green-500 flex-shrink-0" />
+                  <span className="text-xs font-medium text-foreground-secondary uppercase tracking-wider">
+                    Update available — v{updateVersion}
+                  </span>
+                </div>
+
+                {updateChangelog && (
+                  <pre className="text-xs text-muted whitespace-pre-wrap font-sans
+                                  max-h-28 overflow-y-auto mb-3 leading-relaxed">
+                    {updateChangelog.trim()}
+                  </pre>
+                )}
+
+                {updateError && (
+                  <p className="text-xs text-red-400 mb-2">{updateError}</p>
+                )}
+
+                {updateInstalled ? (
+                  <button
+                    onClick={() => restartApp().catch(() => {})}
+                    className="flex items-center gap-2 w-full justify-center px-3 py-2
+                               rounded-lg bg-foreground text-surface text-xs font-medium
+                               hover:opacity-90 transition-opacity"
+                  >
+                    <RotateCw className="w-3.5 h-3.5" />
+                    Restart to apply
+                  </button>
+                ) : (
+                  <button
+                    disabled={isUpdating || !updateAssetUrl}
+                    onClick={async () => {
+                      if (!updateAssetUrl) return;
+                      setIsUpdating(true);
+                      setUpdateError(null);
+                      try {
+                        await installUpdate(updateAssetUrl);
+                        setUpdateInstalled(true);
+                      } catch (e) {
+                        setUpdateError(e instanceof Error ? e.message : String(e));
+                      } finally {
+                        setIsUpdating(false);
+                      }
+                    }}
+                    className="flex items-center gap-2 w-full justify-center px-3 py-2
+                               rounded-lg bg-foreground text-surface text-xs font-medium
+                               hover:opacity-90 transition-opacity disabled:opacity-50"
+                  >
+                    {isUpdating ? (
+                      <><RefreshCw className="w-3.5 h-3.5 animate-spin" /> Downloading…</>
+                    ) : (
+                      <><Download className="w-3.5 h-3.5" /> Install update</>
+                    )}
+                  </button>
+                )}
+              </section>
+            )}
+
             {/* Theme */}
             <section>
               <div className="flex items-center gap-2 mb-3">

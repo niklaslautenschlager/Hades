@@ -271,6 +271,19 @@ interface AppState {
   setForceQuit: (v: boolean) => void;
   setSyncError: (msg: string | null) => void;
   applyMergedNotes: (notes: NoteFile[]) => void;
+
+  // ── Updater (ephemeral, not persisted) ────────────────────────────────────
+  updateAvailable: boolean;
+  updateVersion: string | null;
+  updateChangelog: string | null;
+  updateAssetUrl: string | null;
+  isUpdating: boolean;
+  updateInstalled: boolean;
+  updateError: string | null;
+  setUpdateInfo: (version: string, changelog: string, assetUrl: string) => void;
+  setIsUpdating: (v: boolean) => void;
+  setUpdateInstalled: (v: boolean) => void;
+  setUpdateError: (msg: string | null) => void;
 }
 
 function uid(): string {
@@ -941,6 +954,20 @@ export const useStore = create<AppState>()(
       setForceQuit: (forceQuit) => set({ forceQuit }),
       setSyncError: (syncError) => set({ syncError }),
       applyMergedNotes: (notes) => set({ notes }),
+
+      // ── Updater ──────────────────────────────────────────────────────────
+      updateAvailable:  false,
+      updateVersion:    null,
+      updateChangelog:  null,
+      updateAssetUrl:   null,
+      isUpdating:       false,
+      updateInstalled:  false,
+      updateError:      null,
+      setUpdateInfo: (version, changelog, assetUrl) =>
+        set({ updateAvailable: true, updateVersion: version, updateChangelog: changelog, updateAssetUrl: assetUrl }),
+      setIsUpdating:    (isUpdating)    => set({ isUpdating }),
+      setUpdateInstalled: (updateInstalled) => set({ updateInstalled }),
+      setUpdateError:   (updateError)   => set({ updateError }),
     }),
     {
       name: "hades-store",
@@ -980,6 +1007,14 @@ export const useStore = create<AppState>()(
         quitPending: false,
         forceQuit: false,
         syncError: null,
+        // Ephemeral updater state
+        updateAvailable:  false,
+        updateVersion:    null,
+        updateChangelog:  null,
+        updateAssetUrl:   null,
+        isUpdating:       false,
+        updateInstalled:  false,
+        updateError:      null,
       }),
     }
   )

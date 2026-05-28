@@ -48,6 +48,7 @@ export default function Shell({ children }: ShellProps) {
       setTheme: s.setTheme,
     }))
   );
+  const updateAvailable = useStore(s => s.updateAvailable);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   const mins = String(Math.floor(timeLeft / 60)).padStart(2, "0");
@@ -136,12 +137,15 @@ export default function Shell({ children }: ShellProps) {
         <div className="flex flex-col items-center pb-4">
           <button
             onClick={() => setSettingsOpen(true)}
-            title="Settings"
-            className="flex items-center justify-center w-10 h-10 rounded-lg
+            title={updateAvailable ? "Settings (update available)" : "Settings"}
+            className="relative flex items-center justify-center w-10 h-10 rounded-lg
                        text-muted hover:text-foreground hover:bg-surface-hover
                        transition-all duration-150"
           >
             <Settings className="w-4 h-4" />
+            {updateAvailable && (
+              <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-green-500" />
+            )}
           </button>
         </div>
       </aside>
