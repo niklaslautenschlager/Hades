@@ -3,11 +3,9 @@ import { Loader2, CloudOff, AlertCircle } from "lucide-react";
 import { useStore } from "../store/useStore";
 
 export default function SyncOverlay() {
-  const { quitPending, isSyncing, syncError } = useStore(s => ({
-    quitPending: s.quitPending,
-    isSyncing:   s.isSyncing,
-    syncError:   s.syncError,
-  }));
+  const quitPending = useStore(s => s.quitPending);
+  const isSyncing   = useStore(s => s.isSyncing);
+  const syncError   = useStore(s => s.syncError);
 
   if (!quitPending) return null;
 

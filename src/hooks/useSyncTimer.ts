@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
 import { useStore } from "../store/useStore";
 import { syncDirtyNotes } from "../lib/noteSync";
 
@@ -8,37 +8,22 @@ export function useSyncTimer() {
   const syncEnabled = useStore(s => s.syncEnabled);
   const syncFolder  = useStore(s => s.syncFolder);
 
-  // Use refs so the interval callback always sees fresh state without re-registering
-  const stateRef = useRef({
-    notes:             useStore.getState().notes,
-    lastSyncAt:        useStore.getState().lastSyncAt,
-    isSyncing:         useStore.getState().isSyncing,
-    hasPendingChanges: useStore.getState().hasPendingChanges,
-  });
-
-  useEffect(() => {
-    return useStore.subscribe(s => {
-      stateRef.current = {
-        notes:             s.notes,
-        lastSyncAt:        s.lastSyncAt,
-        isSyncing:         s.isSyncing,
-        hasPendingChanges: s.hasPendingChanges,
-      };
-    });
-  }, []);
-
   useEffect(() => {
     if (!syncEnabled || !syncFolder) return;
 
+    const folder = syncFolder; // capture for closure
+
     const run = async () => {
-      const { notes, lastSyncAt, isSyncing, hasPendingChanges } = stateRef.current;
+      // Always read fresh state so we don't close over stale values
+      const { hasPendingChanges, isSyncing, notes, lastSyncAt,
+              setIsSyncing, setLastSyncAt, setHasPendingChanges, setSyncError } = useStore.getState();
+
       if (!hasPendingChanges || isSyncing) return;
 
-      const { setIsSyncing, setLastSyncAt, setHasPendingChanges, setSyncError } = useStore.getState();
       setIsSyncing(true);
       setSyncError(null);
       try {
-        await syncDirtyNotes(notes, syncFolder, lastSyncAt);
+        await syncDirtyNotes(notes, folder, lastSyncAt);
         setLastSyncAt(new Date().toISOString());
         setHasPendingChanges(false);
       } catch (e) {
