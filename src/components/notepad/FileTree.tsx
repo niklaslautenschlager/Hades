@@ -263,6 +263,15 @@ function FileNode({ file, depth, allFiles }: FileNodeProps) {
           )}
         </span>
 
+        {/* Tag color indicator (no text — search by tag still works in search bar) */}
+        {firstTag && !renaming && (
+          <span
+            className={`flex-shrink-0 w-2 h-2 rounded-full ${color?.text ?? "text-muted"}`}
+            style={{ backgroundColor: "currentColor" }}
+            title={`#${firstTag}`}
+          />
+        )}
+
         {renaming ? (
           <input
             autoFocus
@@ -280,12 +289,6 @@ function FileNode({ file, depth, allFiles }: FileNodeProps) {
           />
         ) : (
           <span className="flex-1 text-xs truncate">{file.name}</span>
-        )}
-
-        {firstTag && !renaming && (
-          <span className={`text-xs flex-shrink-0 ${color?.text ?? "text-muted"}`}>
-            #{firstTag}
-          </span>
         )}
 
         {!renaming && (

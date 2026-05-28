@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import type { GroqModelId } from "../store/useStore";
+import type { AIVendor, GroqModelId } from "../store/useStore";
 
 interface ChatMessage {
   role: "user" | "assistant";
@@ -30,11 +30,49 @@ const UNRESTRICTED_PROMPT = `You are Socrates — an AI assistant embedded in th
 
 The user has activated unrestricted mode. You may now discuss any topic freely — no domain restrictions apply. Be helpful, conversational, and natural. Still use markdown when it aids clarity, and keep responses concise.`;
 
+// ─── Models ──────────────────────────────────────────────────────────────────
+
 export const GROQ_MODELS = [
   { id: "llama-3.3-70b-versatile" as GroqModelId, label: "Llama 3.3 70B" },
   { id: "llama3-8b-8192" as GroqModelId, label: "Llama 3 8B (fast)" },
   { id: "mixtral-8x7b-32768" as GroqModelId, label: "Mixtral 8x7B" },
 ];
+
+export const AI_MODELS: Record<AIVendor, { id: string; label: string }[]> = {
+  groq: GROQ_MODELS,
+  openai: [
+    { id: "gpt-4o-mini",  label: "GPT-4o mini (fast)" },
+    { id: "gpt-4o",        label: "GPT-4o" },
+    { id: "gpt-4-turbo",   label: "GPT-4 Turbo" },
+    { id: "gpt-3.5-turbo", label: "GPT-3.5 Turbo" },
+  ],
+  anthropic: [
+    { id: "claude-haiku-4-5-20251001",  label: "Claude Haiku 4.5" },
+    { id: "claude-sonnet-4-6",          label: "Claude Sonnet 4.6" },
+    { id: "claude-opus-4-7",            label: "Claude Opus 4.7" },
+  ],
+  ollama: [
+    { id: "llama3.2",     label: "Llama 3.2" },
+    { id: "llama3.1",     label: "Llama 3.1" },
+    { id: "qwen2.5",      label: "Qwen 2.5" },
+    { id: "mistral",      label: "Mistral" },
+    { id: "gemma2",       label: "Gemma 2" },
+  ],
+};
+
+export const VENDOR_LABELS: Record<AIVendor, string> = {
+  groq: "Groq",
+  openai: "OpenAI",
+  anthropic: "Anthropic",
+  ollama: "Ollama (local)",
+};
+
+export const VENDOR_KEY_URLS: Record<AIVendor, string | null> = {
+  groq: "https://console.groq.com/keys",
+  openai: "https://platform.openai.com/api-keys",
+  anthropic: "https://console.anthropic.com/settings/keys",
+  ollama: null,
+};
 
 // ─── Commands ────────────────────────────────────────────────────────────────
 
@@ -55,6 +93,7 @@ export const COMMANDS: Command[] = [
   { name: "/clear", description: "Clear the conversation", type: "local" },
   { name: "/help", description: "List all available commands", type: "local" },
   { name: "/model", description: "Switch AI model (e.g. /model fast)", type: "local" },
+  { name: "/vendor", description: "Switch AI vendor (groq, openai, anthropic, ollama)", type: "local" },
   { name: "/goal", description: "Set the session goal (e.g. /goal Finish chapter 5)", type: "local" },
   { name: "/timer", description: "Control the timer (start, pause, reset)", type: "local" },
   { name: "/note", description: "Create a new note (e.g. /note Physics Notes)", type: "local" },
@@ -119,53 +158,62 @@ export function matchingCommands(input: string): Command[] {
 
 // ─── Streaming ───────────────────────────────────────────────────────────────
 
-function formatError(raw: string): string {
+function formatError(raw: string, vendor: AIVendor): string {
   if (raw.includes("403") || raw.includes("Access denied")) {
-    return "Connection to Groq failed (403). Check that:\n• Your VPN is disabled (Groq blocks many VPN IPs)\n• Your API key is still valid at console.groq.com";
+    return `Connection to ${VENDOR_LABELS[vendor]} failed (403). Check that:\n• Your VPN is disabled (some providers block VPN IPs)\n• Your API key is still valid`;
   }
   if (raw.includes("401") || raw.includes("Unauthorized")) {
-    return "Invalid API key. Go to Settings (⚙) and enter a valid Groq API key from console.groq.com";
+    return `Invalid API key. Open Settings (⚙) and verify your ${VENDOR_LABELS[vendor]} key.`;
   }
   if (raw.includes("429") || raw.includes("rate limit")) {
     return "Rate limit reached. Wait a moment and try again.";
   }
+  if (vendor === "ollama" && (raw.includes("Connection refused") || raw.includes("connect"))) {
+    return "Cannot reach Ollama. Make sure `ollama serve` is running locally on port 11434.";
+  }
   return raw;
 }
 
+export interface AIRequest {
+  vendor: AIVendor;
+  apiKey: string;
+  model: string;
+  baseUrl?: string;
+  messages: ChatMessage[];
+  unrestricted: boolean;
+}
+
 export async function streamChatResponse(
-  apiKey: string,
-  messages: ChatMessage[],
-  model: GroqModelId,
-  unrestricted: boolean,
+  req: AIRequest,
   onDelta: (text: string) => void,
   onDone: () => void,
   onError: (err: string) => void
 ): Promise<void> {
-  if (!apiKey.trim()) {
-    onError("No API key configured. Open Settings (⚙) and add your Groq API key.");
+  const needsKey = req.vendor !== "ollama";
+  if (needsKey && !req.apiKey.trim()) {
+    onError(`No API key configured for ${VENDOR_LABELS[req.vendor]}. Open Settings (⚙) and add it.`);
     return;
   }
 
-  const unlistenDelta = await listen<string>("groq-delta", (event) => {
+  const unlistenDelta = await listen<string>("ai-delta", (event) => {
     onDelta(event.payload);
   });
 
   const donePromise = new Promise<void>((resolve) => {
-    listen("groq-done", () => resolve()).then();
+    listen("ai-done", () => resolve()).then();
   });
 
   try {
-    const systemPrompt = unrestricted ? UNRESTRICTED_PROMPT : STUDY_PROMPT;
-    const allMessages = [
-      { role: "system", content: systemPrompt },
-      ...messages.map((m) => ({ role: m.role, content: m.content })),
-    ];
+    const systemPrompt = req.unrestricted ? UNRESTRICTED_PROMPT : STUDY_PROMPT;
 
     await Promise.all([
-      invoke("chat_groq", {
-        apiKey,
-        model,
-        messages: allMessages,
+      invoke("chat_completion", {
+        vendor: req.vendor,
+        apiKey: req.apiKey,
+        model: req.model,
+        baseUrl: req.baseUrl ?? null,
+        system: systemPrompt,
+        messages: req.messages.map((m) => ({ role: m.role, content: m.content })),
       }),
       donePromise,
     ]);
@@ -173,7 +221,7 @@ export async function streamChatResponse(
     onDone();
   } catch (err: unknown) {
     const raw = err instanceof Error ? err.message : String(err);
-    onError(formatError(raw));
+    onError(formatError(raw, req.vendor));
   } finally {
     unlistenDelta();
   }

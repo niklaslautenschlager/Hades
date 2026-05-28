@@ -9,9 +9,11 @@ import {
   findCommand,
   matchingCommands,
   COMMANDS,
-  GROQ_MODELS,
+  AI_MODELS,
+  VENDOR_LABELS,
   type Command,
 } from "../../lib/ai";
+import type { AIVendor } from "../../store/useStore";
 
 marked.setOptions({ breaks: true, gfm: true });
 
@@ -31,8 +33,8 @@ export default function AIAssistant({ goal }: Props) {
   const {
     chatMessages,
     isChatLoading,
-    apiKey,
-    groqModel,
+    aiVendor,
+    aiVendorConfigs,
     addChatMessage,
     setChatLoading,
     clearChat,
@@ -42,14 +44,14 @@ export default function AIAssistant({ goal }: Props) {
     resetTimer,
     setActiveModule,
     addNote,
-    setGroqModel,
-    sessionsCompleted,
+    setAIVendor,
+    setAIVendorConfig,
   } = useStore(
     useShallow((s) => ({
       chatMessages: s.chatMessages,
       isChatLoading: s.isChatLoading,
-      apiKey: s.apiKey,
-      groqModel: s.groqModel,
+      aiVendor: s.aiVendor,
+      aiVendorConfigs: s.aiVendorConfigs,
       addChatMessage: s.addChatMessage,
       setChatLoading: s.setChatLoading,
       clearChat: s.clearChat,
@@ -59,10 +61,13 @@ export default function AIAssistant({ goal }: Props) {
       resetTimer: s.resetTimer,
       setActiveModule: s.setActiveModule,
       addNote: s.addNote,
-      setGroqModel: s.setGroqModel,
-      sessionsCompleted: s.sessionsCompleted,
+      setAIVendor: s.setAIVendor,
+      setAIVendorConfig: s.setAIVendorConfig,
     }))
   );
+
+  const activeConfig = aiVendorConfigs[aiVendor];
+  const availableModels = AI_MODELS[aiVendor];
 
   const [input, setInput] = useState("");
   const [streamingContent, setStreamingContent] = useState("");
@@ -111,29 +116,39 @@ export default function AIAssistant({ goal }: Props) {
         return true;
 
       case "/model": {
-        const modelMap: Record<string, string> = {
-          "70b": "llama-3.3-70b-versatile",
-          "versatile": "llama-3.3-70b-versatile",
-          "llama": "llama-3.3-70b-versatile",
-          "8b": "llama3-8b-8192",
-          "fast": "llama3-8b-8192",
-          "small": "llama3-8b-8192",
-          "mixtral": "mixtral-8x7b-32768",
-          "8x7b": "mixtral-8x7b-32768",
-        };
-        const key = arg.toLowerCase();
-        const modelId = modelMap[key];
-        if (modelId) {
-          setGroqModel(modelId as any);
-          const label = GROQ_MODELS.find((m) => m.id === modelId)?.label ?? modelId;
+        const argLower = arg.toLowerCase();
+        // Look for matching model in current vendor
+        const found = availableModels.find(
+          (m) => m.id.toLowerCase().includes(argLower) || m.label.toLowerCase().includes(argLower)
+        );
+        if (found && argLower) {
+          setAIVendorConfig(aiVendor, { model: found.id });
           addChatMessage({ role: "user", content: `/model ${arg}` });
-          addChatMessage({ role: "assistant", content: `Switched to **${label}**.` });
+          addChatMessage({ role: "assistant", content: `Switched to **${found.label}**.` });
         } else {
           addChatMessage({ role: "user", content: `/model ${arg}` });
-          const available = GROQ_MODELS.map((m) => `\`${m.label}\``).join(", ");
+          const available = availableModels.map((m) => `\`${m.label}\``).join(", ");
           addChatMessage({
             role: "assistant",
-            content: `Unknown model "${arg}". Available: ${available}\n\nShortcuts: \`fast\` (8B), \`versatile\` (70B), \`mixtral\` (8x7B)`,
+            content: `Models for ${VENDOR_LABELS[aiVendor]}: ${available}`,
+          });
+        }
+        return true;
+      }
+
+      case "/vendor": {
+        const argLower = arg.toLowerCase().trim();
+        const validVendors: AIVendor[] = ["groq", "openai", "anthropic", "ollama"];
+        const target = validVendors.find((v) => v === argLower);
+        if (target) {
+          setAIVendor(target);
+          addChatMessage({ role: "user", content: `/vendor ${arg}` });
+          addChatMessage({ role: "assistant", content: `Switched to **${VENDOR_LABELS[target]}**.` });
+        } else {
+          addChatMessage({ role: "user", content: `/vendor ${arg}` });
+          addChatMessage({
+            role: "assistant",
+            content: `Current vendor: **${VENDOR_LABELS[aiVendor]}**\n\nAvailable: ${validVendors.map((v) => `\`${v}\``).join(", ")}`,
           });
         }
         return true;
@@ -221,7 +236,15 @@ export default function AIAssistant({ goal }: Props) {
         setChatLoading(true);
         let accumulated = "";
 
-        await streamChatResponse(apiKey, allMessages, groqModel, unrestricted,
+        await streamChatResponse(
+          {
+            vendor: aiVendor,
+            apiKey: activeConfig.apiKey,
+            model: activeConfig.model,
+            baseUrl: activeConfig.baseUrl,
+            messages: allMessages,
+            unrestricted,
+          },
           (delta) => { accumulated += delta; setStreamingContent(accumulated); },
           () => { addChatMessage({ role: "assistant", content: accumulated }); setStreamingContent(""); setChatLoading(false); },
           (err) => { setError(err); setStreamingContent(""); setChatLoading(false); },
@@ -238,7 +261,15 @@ export default function AIAssistant({ goal }: Props) {
     setChatLoading(true);
     let accumulated = "";
 
-    await streamChatResponse(apiKey, allMessages, groqModel, unrestricted,
+    await streamChatResponse(
+      {
+        vendor: aiVendor,
+        apiKey: activeConfig.apiKey,
+        model: activeConfig.model,
+        baseUrl: activeConfig.baseUrl,
+        messages: allMessages,
+        unrestricted,
+      },
       (delta) => { accumulated += delta; setStreamingContent(accumulated); },
       () => { addChatMessage({ role: "assistant", content: accumulated }); setStreamingContent(""); setChatLoading(false); },
       (err) => { setError(err); setStreamingContent(""); setChatLoading(false); },
@@ -314,7 +345,9 @@ export default function AIAssistant({ goal }: Props) {
               unrestricted
             </span>
           ) : (
-            <span className="text-xs text-muted ml-1">education & productivity only</span>
+            <span className="text-xs text-muted ml-1">
+              {VENDOR_LABELS[aiVendor]}
+            </span>
           )}
         </div>
         {hasMessages && (

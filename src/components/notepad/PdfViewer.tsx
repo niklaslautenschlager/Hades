@@ -104,9 +104,11 @@ export default function PdfViewer({ onClose }: Props) {
       {pdfUrl ? (
         <div className="flex-1 min-h-0">
           <iframe
-            src={pdfUrl}
+            key={pdfUrl}
+            src={`${pdfUrl}#toolbar=1&navpanes=0&statusbar=0`}
             className="w-full h-full border-none"
             title="PDF Viewer"
+            loading="lazy"
           />
         </div>
       ) : (

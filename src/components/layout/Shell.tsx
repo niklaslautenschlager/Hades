@@ -8,12 +8,20 @@ import {
   Flame,
   Layers,
   BarChart3,
-  Sun,
-  Moon,
+  Palette,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { useShallow } from "zustand/react/shallow";
-import { useStore, type Module } from "../../store/useStore";
+import { useStore, type Module, type Theme } from "../../store/useStore";
+
+const THEME_CYCLE: Theme[] = ["dark", "light", "catppuccin", "gruvbox", "nord"];
+const THEME_LABELS: Record<Theme, string> = {
+  dark: "Dark",
+  light: "Paper",
+  catppuccin: "Catppuccin",
+  gruvbox: "Gruvbox",
+  nord: "Nord",
+};
 import SettingsModal from "../settings/SettingsModal";
 
 const NAV_ITEMS: { id: Module; icon: React.ElementType; label: string }[] = [
@@ -107,16 +115,20 @@ export default function Shell({ children }: ShellProps) {
           </motion.button>
         )}
 
-        {/* Theme toggle */}
+        {/* Theme cycler */}
         <div className="flex flex-col items-center pb-2">
           <button
-            onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-            title={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
+            onClick={() => {
+              const idx = THEME_CYCLE.indexOf(theme);
+              const next = THEME_CYCLE[(idx + 1) % THEME_CYCLE.length];
+              setTheme(next);
+            }}
+            title={`Theme: ${THEME_LABELS[theme]} — click to cycle`}
             className="flex items-center justify-center w-10 h-10 rounded-lg
                        text-muted hover:text-foreground hover:bg-surface-hover
                        transition-all duration-150"
           >
-            {theme === "dark" ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+            <Palette className="w-4 h-4" />
           </button>
         </div>
 

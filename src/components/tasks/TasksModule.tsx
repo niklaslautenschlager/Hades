@@ -1,8 +1,16 @@
 import { useState, useRef } from "react";
-import { Plus, Trash2 } from "lucide-react";
+import { Plus, Trash2, AlertCircle, Calendar as CalIcon } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+import { format, parseISO, isBefore, isToday, isTomorrow } from "date-fns";
 import { useShallow } from "zustand/react/shallow";
 import { useStore, type Task } from "../../store/useStore";
+
+function formatDueDate(iso: string): string {
+  const d = parseISO(iso);
+  if (isToday(d)) return `Today ${format(d, "HH:mm")}`;
+  if (isTomorrow(d)) return `Tomorrow ${format(d, "HH:mm")}`;
+  return format(d, "MMM d, HH:mm");
+}
 
 interface TaskItemProps {
   task: Task;
@@ -27,9 +35,13 @@ function TaskItem({ task }: TaskItemProps) {
     setIsEditing(false);
   }
 
+  const isLinkedDeadline = !!task.linkedEventId;
+  const overdue = task.dueDate && !task.completed && isBefore(parseISO(task.dueDate), new Date());
+
   return (
-    <div className="group flex items-center gap-3 px-4 py-3.5 surface
-                    cursor-default select-none hover:border-border-active transition-all duration-150">
+    <div className={`group flex items-center gap-3 px-4 py-3.5 surface
+                    cursor-default select-none hover:border-border-active transition-all duration-150
+                    ${overdue ? "border-red-900/50" : ""}`}>
       {/* Checkbox */}
       <button
         onClick={() => toggleTask(task.id)}
@@ -81,14 +93,29 @@ function TaskItem({ task }: TaskItemProps) {
           />
         ) : (
           <>
-            <span
-              onDoubleClick={() => { setEditText(task.text); setIsEditing(true); }}
-              className={`text-sm transition-colors duration-300 ${
-                task.completed ? "text-muted" : "text-foreground"
-              }`}
-            >
-              {task.text}
-            </span>
+            <div className="flex items-center gap-2">
+              {isLinkedDeadline && (
+                <AlertCircle
+                  className={`w-3.5 h-3.5 flex-shrink-0 ${overdue ? "text-red-400" : "text-orange-400"}`}
+                />
+              )}
+              <span
+                onDoubleClick={() => { setEditText(task.text); setIsEditing(true); }}
+                className={`text-sm transition-colors duration-300 ${
+                  task.completed ? "text-muted" : "text-foreground"
+                }`}
+              >
+                {task.text}
+              </span>
+            </div>
+            {task.dueDate && (
+              <div className={`flex items-center gap-1 mt-0.5 text-xs
+                              ${overdue ? "text-red-400" : "text-muted"}`}>
+                <CalIcon className="w-3 h-3" />
+                {formatDueDate(task.dueDate)}
+                {overdue && <span className="ml-1 font-medium">overdue</span>}
+              </div>
+            )}
 
             <motion.div
               className="absolute left-0 right-0 top-1/2 -translate-y-1/2 h-px bg-muted"

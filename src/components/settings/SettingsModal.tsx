@@ -1,11 +1,10 @@
 import { useState } from "react";
-import { X, Key, Timer, Eye, EyeOff, Cpu, Volume2, Play } from "lucide-react";
+import { X, Key, Timer, Eye, EyeOff, Cpu, Volume2, Play, Palette, CalendarClock, Sliders } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useShallow } from "zustand/react/shallow";
-import { useStore, type SoundType } from "../../store/useStore";
-import { GROQ_MODELS } from "../../lib/ai";
+import { useStore, type SoundType, type Theme, type AIVendor } from "../../store/useStore";
+import { AI_MODELS, VENDOR_LABELS, VENDOR_KEY_URLS } from "../../lib/ai";
 import { previewSound } from "../../lib/sound";
-import type { GroqModelId } from "../../store/useStore";
 
 interface Props {
   onClose: () => void;
@@ -19,12 +18,18 @@ const SOUND_OPTIONS: { id: SoundType; label: string; description: string }[] = [
   { id: "none", label: "None", description: "No sound" },
 ];
 
+const THEME_OPTIONS: { id: Theme; label: string; description: string; preview: string[] }[] = [
+  { id: "dark",       label: "Zinc Dark",  description: "Default dark",         preview: ["#09090b", "#27272a", "#f4f4f5"] },
+  { id: "light",      label: "Paper",      description: "Warm paper white",     preview: ["#faf8f1", "#e9e3d0", "#1c1917"] },
+  { id: "catppuccin", label: "Catppuccin", description: "Mocha — soft pastels", preview: ["#1e1e2e", "#45475a", "#cdd6f4"] },
+  { id: "gruvbox",    label: "Gruvbox",    description: "Retro warm earth",     preview: ["#282828", "#504945", "#ebdbb2"] },
+  { id: "nord",       label: "Nord",       description: "Cool arctic blues",    preview: ["#2e3440", "#4c566a", "#eceff4"] },
+];
+
+const VENDOR_IDS: AIVendor[] = ["groq", "openai", "anthropic", "ollama"];
+
 export default function SettingsModal({ onClose }: Props) {
   const {
-    apiKey,
-    setApiKey,
-    groqModel,
-    setGroqModel,
     workDuration,
     breakDuration,
     longBreakDuration,
@@ -34,12 +39,22 @@ export default function SettingsModal({ onClose }: Props) {
     setSoundType,
     soundVolume,
     setSoundVolume,
+    theme,
+    setTheme,
+    aiVendor,
+    aiVendorConfigs,
+    setAIVendor,
+    setAIVendorConfig,
+    autoSyncDeadlines,
+    setAutoSyncDeadlines,
+    showWeekNumbers,
+    setShowWeekNumbers,
+    weekStartsOn,
+    setWeekStartsOn,
+    weeklyGoalHours,
+    setWeeklyGoalHours,
   } = useStore(
     useShallow((s) => ({
-      apiKey: s.apiKey,
-      setApiKey: s.setApiKey,
-      groqModel: s.groqModel,
-      setGroqModel: s.setGroqModel,
       workDuration: s.workDuration,
       breakDuration: s.breakDuration,
       longBreakDuration: s.longBreakDuration,
@@ -49,34 +64,70 @@ export default function SettingsModal({ onClose }: Props) {
       setSoundType: s.setSoundType,
       soundVolume: s.soundVolume,
       setSoundVolume: s.setSoundVolume,
+      theme: s.theme,
+      setTheme: s.setTheme,
+      aiVendor: s.aiVendor,
+      aiVendorConfigs: s.aiVendorConfigs,
+      setAIVendor: s.setAIVendor,
+      setAIVendorConfig: s.setAIVendorConfig,
+      autoSyncDeadlines: s.autoSyncDeadlines,
+      setAutoSyncDeadlines: s.setAutoSyncDeadlines,
+      showWeekNumbers: s.showWeekNumbers,
+      setShowWeekNumbers: s.setShowWeekNumbers,
+      weekStartsOn: s.weekStartsOn,
+      setWeekStartsOn: s.setWeekStartsOn,
+      weeklyGoalHours: s.weeklyGoalHours,
+      setWeeklyGoalHours: s.setWeeklyGoalHours,
     }))
   );
 
-  const [localKey, setLocalKey] = useState(apiKey);
+  const [localVendor, setLocalVendor] = useState<AIVendor>(aiVendor);
+  const localConfig = aiVendorConfigs[localVendor];
+  const [keyDraft, setKeyDraft] = useState(localConfig.apiKey);
+  const [modelDraft, setModelDraft] = useState(localConfig.model);
+  const [baseUrlDraft, setBaseUrlDraft] = useState(localConfig.baseUrl ?? "");
   const [showKey, setShowKey] = useState(false);
-  const [localModel, setLocalModel] = useState<GroqModelId>(groqModel);
+
   const [work, setWork] = useState(String(workDuration));
   const [brk, setBrk] = useState(String(breakDuration));
   const [longBrk, setLongBrk] = useState(String(longBreakDuration));
   const [sessions, setSessions] = useState(String(sessionsUntilLongBreak));
+  const [goalHours, setGoalHours] = useState(String(weeklyGoalHours));
   const [localSound, setLocalSound] = useState<SoundType>(soundType);
   const [localVolume, setLocalVolume] = useState(soundVolume);
   const [saved, setSaved] = useState(false);
 
+  function selectVendor(v: AIVendor) {
+    setLocalVendor(v);
+    const cfg = aiVendorConfigs[v];
+    setKeyDraft(cfg.apiKey);
+    setModelDraft(cfg.model);
+    setBaseUrlDraft(cfg.baseUrl ?? "");
+  }
+
   function handleSave() {
-    setApiKey(localKey.trim());
-    setGroqModel(localModel);
+    setAIVendor(localVendor);
+    setAIVendorConfig(localVendor, {
+      apiKey: keyDraft.trim(),
+      model: modelDraft,
+      baseUrl: baseUrlDraft.trim() || undefined,
+    });
+
     setPomodoroSettings({
       workDuration: Math.max(1, Math.min(90, parseInt(work) || 25)),
       breakDuration: Math.max(1, Math.min(30, parseInt(brk) || 5)),
       longBreakDuration: Math.max(1, Math.min(60, parseInt(longBrk) || 15)),
       sessionsUntilLongBreak: Math.max(2, Math.min(8, parseInt(sessions) || 4)),
     });
+    setWeeklyGoalHours(Math.max(1, Math.min(168, parseInt(goalHours) || 20)));
     setSoundType(localSound);
     setSoundVolume(localVolume);
     setSaved(true);
     setTimeout(() => setSaved(false), 1800);
   }
+
+  const keyUrl = VENDOR_KEY_URLS[localVendor];
+  const needsKey = localVendor !== "ollama";
 
   return (
     <AnimatePresence>
@@ -109,67 +160,164 @@ export default function SettingsModal({ onClose }: Props) {
           </div>
 
           <div className="space-y-6">
-            {/* Groq API Key */}
+            {/* Theme */}
             <section>
               <div className="flex items-center gap-2 mb-3">
-                <Key className="w-3.5 h-3.5 text-muted" />
+                <Palette className="w-3.5 h-3.5 text-muted" />
                 <span className="text-xs font-medium text-foreground-secondary uppercase tracking-wider">
-                  Groq API Key
-                </span>
-                <a
-                  href="https://console.groq.com/keys"
-                  target="_blank"
-                  rel="noreferrer"
-                  className="ml-auto text-xs text-muted hover:text-foreground-secondary transition-colors"
-                >
-                  console.groq.com
-                </a>
-              </div>
-              <div className="relative">
-                <input
-                  type={showKey ? "text" : "password"}
-                  value={localKey}
-                  onChange={(e) => setLocalKey(e.target.value)}
-                  placeholder="gsk_..."
-                  className="input-base pr-10 font-mono text-xs"
-                />
-                <button
-                  onClick={() => setShowKey(!showKey)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted
-                             hover:text-foreground-secondary transition-colors"
-                >
-                  {showKey ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                </button>
-              </div>
-              <p className="mt-1.5 text-xs text-muted">
-                Free tier available. Stored locally, never transmitted elsewhere.
-              </p>
-            </section>
-
-            {/* Model selection */}
-            <section>
-              <div className="flex items-center gap-2 mb-3">
-                <Cpu className="w-3.5 h-3.5 text-muted" />
-                <span className="text-xs font-medium text-foreground-secondary uppercase tracking-wider">
-                  Model
+                  Theme
                 </span>
               </div>
-              <div className="flex flex-col gap-1.5">
-                {GROQ_MODELS.map((m) => (
+              <div className="grid grid-cols-1 gap-1.5">
+                {THEME_OPTIONS.map((t) => (
                   <button
-                    key={m.id}
-                    onClick={() => setLocalModel(m.id)}
-                    className={`flex items-center justify-between px-3 py-2.5 rounded-lg border
+                    key={t.id}
+                    onClick={() => setTheme(t.id)}
+                    className={`flex items-center justify-between px-3 py-2 rounded-lg border
                                 text-sm transition-all duration-150
-                                ${localModel === m.id
+                                ${theme === t.id
                                   ? "bg-surface-hover border-border-active text-foreground"
                                   : "bg-transparent border-border text-foreground-secondary hover:text-foreground hover:border-border-active"
                                 }`}
                   >
-                    <span className="font-medium">{m.label}</span>
-                    <span className="text-xs font-mono text-muted">{m.id}</span>
+                    <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-0.5">
+                        {t.preview.map((c, i) => (
+                          <div key={i} className="w-3.5 h-3.5 rounded-full border border-border" style={{ backgroundColor: c }} />
+                        ))}
+                      </div>
+                      <span className="font-medium">{t.label}</span>
+                    </div>
+                    <span className="text-xs text-muted">{t.description}</span>
                   </button>
                 ))}
+              </div>
+            </section>
+
+            {/* AI Vendor */}
+            <section>
+              <div className="flex items-center gap-2 mb-3">
+                <Cpu className="w-3.5 h-3.5 text-muted" />
+                <span className="text-xs font-medium text-foreground-secondary uppercase tracking-wider">
+                  AI Vendor
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-1.5 mb-3">
+                {VENDOR_IDS.map((v) => (
+                  <button
+                    key={v}
+                    onClick={() => selectVendor(v)}
+                    className={`px-3 py-2 rounded-lg border text-sm font-medium transition-all
+                                ${localVendor === v
+                                  ? "bg-surface-hover border-border-active text-foreground"
+                                  : "bg-transparent border-border text-foreground-secondary hover:text-foreground hover:border-border-active"
+                                }`}
+                  >
+                    {VENDOR_LABELS[v]}
+                  </button>
+                ))}
+              </div>
+
+              {needsKey && (
+                <>
+                  <div className="flex items-center gap-2 mb-2">
+                    <Key className="w-3 h-3 text-muted" />
+                    <span className="text-xs text-muted">API Key</span>
+                    {keyUrl && (
+                      <a
+                        href={keyUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="ml-auto text-xs text-muted hover:text-foreground-secondary transition-colors"
+                      >
+                        get a key →
+                      </a>
+                    )}
+                  </div>
+                  <div className="relative mb-3">
+                    <input
+                      type={showKey ? "text" : "password"}
+                      value={keyDraft}
+                      onChange={(e) => setKeyDraft(e.target.value)}
+                      placeholder={localVendor === "groq" ? "gsk_..." : localVendor === "openai" ? "sk-..." : "sk-ant-..."}
+                      className="input-base pr-10 font-mono text-xs"
+                    />
+                    <button
+                      onClick={() => setShowKey(!showKey)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted
+                                 hover:text-foreground-secondary transition-colors"
+                    >
+                      {showKey ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                    </button>
+                  </div>
+                </>
+              )}
+
+              {localVendor === "ollama" && (
+                <div className="mb-3">
+                  <label className="block text-xs text-muted mb-1">Base URL</label>
+                  <input
+                    type="text"
+                    value={baseUrlDraft}
+                    onChange={(e) => setBaseUrlDraft(e.target.value)}
+                    placeholder="http://localhost:11434"
+                    className="input-base font-mono text-xs"
+                  />
+                  <p className="text-xs text-muted mt-1">
+                    Requires <code className="font-mono">ollama serve</code> running locally.
+                  </p>
+                </div>
+              )}
+
+              <div>
+                <label className="block text-xs text-muted mb-1.5">Model</label>
+                <div className="flex flex-col gap-1.5">
+                  {AI_MODELS[localVendor].map((m) => (
+                    <button
+                      key={m.id}
+                      onClick={() => setModelDraft(m.id)}
+                      className={`flex items-center justify-between px-3 py-2 rounded-lg border
+                                  text-sm transition-all duration-150
+                                  ${modelDraft === m.id
+                                    ? "bg-surface-hover border-border-active text-foreground"
+                                    : "bg-transparent border-border text-foreground-secondary hover:text-foreground hover:border-border-active"
+                                  }`}
+                    >
+                      <span className="font-medium">{m.label}</span>
+                      <span className="text-xs font-mono text-muted">{m.id}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </section>
+
+            {/* Calendar / Productivity Behavior */}
+            <section>
+              <div className="flex items-center gap-2 mb-3">
+                <CalendarClock className="w-3.5 h-3.5 text-muted" />
+                <span className="text-xs font-medium text-foreground-secondary uppercase tracking-wider">
+                  Calendar & Tasks
+                </span>
+              </div>
+              <div className="space-y-2.5">
+                <Toggle
+                  label="Auto-sync deadlines to Tasks"
+                  description="Calendar events marked as deadlines show up in the to-do list."
+                  value={autoSyncDeadlines}
+                  onChange={setAutoSyncDeadlines}
+                />
+                <Toggle
+                  label="Week starts on Monday"
+                  description="Otherwise weeks start on Sunday."
+                  value={weekStartsOn === 1}
+                  onChange={(v) => setWeekStartsOn(v ? 1 : 0)}
+                />
+                <Toggle
+                  label="Show week numbers"
+                  description="Display ISO week numbers in calendar views."
+                  value={showWeekNumbers}
+                  onChange={setShowWeekNumbers}
+                />
               </div>
             </section>
 
@@ -198,6 +346,25 @@ export default function SettingsModal({ onClose }: Props) {
                     />
                   </div>
                 ))}
+              </div>
+            </section>
+
+            {/* Weekly Goal */}
+            <section>
+              <div className="flex items-center gap-2 mb-3">
+                <Sliders className="w-3.5 h-3.5 text-muted" />
+                <span className="text-xs font-medium text-foreground-secondary uppercase tracking-wider">
+                  Weekly Focus Goal
+                </span>
+              </div>
+              <div className="flex items-center gap-3">
+                <input
+                  type="number"
+                  value={goalHours}
+                  onChange={(e) => setGoalHours(e.target.value)}
+                  className="input-base text-center font-mono w-24"
+                />
+                <span className="text-xs text-muted">hours per week</span>
               </div>
             </section>
 
@@ -269,5 +436,41 @@ export default function SettingsModal({ onClose }: Props) {
         </motion.div>
       </motion.div>
     </AnimatePresence>
+  );
+}
+
+function Toggle({
+  label,
+  description,
+  value,
+  onChange,
+}: {
+  label: string;
+  description?: string;
+  value: boolean;
+  onChange: (v: boolean) => void;
+}) {
+  return (
+    <button
+      onClick={() => onChange(!value)}
+      className="flex items-center justify-between gap-3 w-full px-3 py-2 rounded-lg border border-border
+                 hover:border-border-active text-left transition-all duration-150"
+    >
+      <div className="flex-1 min-w-0">
+        <span className="text-sm font-medium text-foreground">{label}</span>
+        {description && (
+          <p className="text-xs text-muted mt-0.5">{description}</p>
+        )}
+      </div>
+      <div
+        className={`w-9 h-5 rounded-full relative transition-colors flex-shrink-0
+                    ${value ? "bg-foreground" : "bg-surface-hover"}`}
+      >
+        <div
+          className={`absolute top-0.5 w-4 h-4 rounded-full transition-all
+                      ${value ? "left-[18px] bg-surface" : "left-0.5 bg-muted"}`}
+        />
+      </div>
+    </button>
   );
 }

@@ -12,13 +12,16 @@ import {
   BookOpen,
   PanelLeftClose,
   PanelLeftOpen,
+  Calculator as CalcIcon,
 } from "lucide-react";
+import { AnimatePresence } from "framer-motion";
 import { useShallow } from "zustand/react/shallow";
 import { useStore } from "../../store/useStore";
 import FileTree from "./FileTree";
 import Editor from "./Editor";
 import MarkdownPreview from "./MarkdownPreview";
 import PdfViewer from "./PdfViewer";
+import Calculator from "./Calculator";
 import { exportAsMarkdown, exportAsPdf } from "../../lib/noteExport";
 import { importObsidianVault } from "../../lib/noteImport";
 
@@ -42,6 +45,7 @@ export default function NotepadModule() {
   const [editing, setEditing] = useState(false);
   const [showExportMenu, setShowExportMenu] = useState(false);
   const [showSidebar, setShowSidebar] = useState(true);
+  const [showCalculator, setShowCalculator] = useState(false);
   const importRef = useRef<HTMLInputElement>(null);
 
   const wordCount = useMemo(
@@ -229,6 +233,21 @@ export default function NotepadModule() {
                   <span className="text-xs text-muted">{wordCount} words</span>
                 )}
 
+                {/* Calculator toggle */}
+                <button
+                  onClick={() => setShowCalculator((v) => !v)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium
+                               transition-all duration-150
+                               ${showCalculator
+                                 ? "bg-foreground text-surface"
+                                 : "text-muted hover:text-foreground-secondary hover:bg-surface-hover"
+                               }`}
+                  title={showCalculator ? "Close calculator" : "Open scientific calculator"}
+                >
+                  <CalcIcon className="w-3.5 h-3.5" />
+                  Calc
+                </button>
+
                 {/* PDF viewer toggle */}
                 <button
                   onClick={toggleNotepadPdf}
@@ -405,6 +424,15 @@ export default function NotepadModule() {
           </div>
         )}
       </div>
+
+      {/* Floating Calculator */}
+      <AnimatePresence>
+        {showCalculator && (
+          <div className="fixed bottom-6 right-6 z-40">
+            <Calculator onClose={() => setShowCalculator(false)} />
+          </div>
+        )}
+      </AnimatePresence>
 
       {/* PDF Viewer panel — resizable */}
       {showNotepadPdf && (

@@ -7,13 +7,23 @@ export type GroqModelId =
   | "llama3-8b-8192"
   | "mixtral-8x7b-32768";
 
+// ─── AI Vendor Types ────────────────────────────────────────────────────────
+
+export type AIVendor = "groq" | "openai" | "anthropic" | "ollama";
+
+export interface AIVendorConfig {
+  apiKey: string;
+  model: string;
+  baseUrl?: string; // override for Ollama / OpenAI-compatible self-hosted
+}
+
 // ─── Types ──────────────────────────────────────────────────────────────────
 
 export type Module = "calendar" | "pomodoro" | "notepad" | "tasks" | "flashcards" | "stats";
 
 export type PomodoroMode = "work" | "break" | "longBreak";
 
-export type Theme = "dark" | "light";
+export type Theme = "dark" | "light" | "catppuccin" | "gruvbox" | "nord";
 
 export type SoundType = "bell" | "chime" | "gong" | "digital" | "none";
 
@@ -33,6 +43,10 @@ export interface CalendarEvent {
   description?: string;
   // Recurrence
   recurrence?: RecurrenceRule;
+  // Deadline marker — synced to to-do list
+  isDeadline?: boolean;
+  // Linked task ID (for syncing)
+  linkedTaskId?: string;
 }
 
 export interface RecurrenceRule {
@@ -70,6 +84,9 @@ export interface Task {
   text: string;
   completed: boolean;
   createdAt: string;
+  // Deadline support (from calendar deadline events)
+  dueDate?: string; // ISO string
+  linkedEventId?: string;
 }
 
 // ─── Flashcard Types ────────────────────────────────────────────────────────
@@ -115,12 +132,27 @@ interface AppState {
   theme: Theme;
   soundType: SoundType;
   soundVolume: number;
+
+  // AI vendor system
+  aiVendor: AIVendor;
+  aiVendorConfigs: Record<AIVendor, AIVendorConfig>;
+  setAIVendor: (v: AIVendor) => void;
+  setAIVendorConfig: (v: AIVendor, patch: Partial<AIVendorConfig>) => void;
+
   setActiveModule: (m: Module) => void;
   setApiKey: (key: string) => void;
   setGroqModel: (model: GroqModelId) => void;
   setTheme: (t: Theme) => void;
   setSoundType: (s: SoundType) => void;
   setSoundVolume: (v: number) => void;
+
+  // Misc settings
+  autoSyncDeadlines: boolean;
+  setAutoSyncDeadlines: (v: boolean) => void;
+  showWeekNumbers: boolean;
+  setShowWeekNumbers: (v: boolean) => void;
+  weekStartsOn: 0 | 1; // Sunday or Monday
+  setWeekStartsOn: (v: 0 | 1) => void;
 
   // ── Pomodoro ──────────────────────────────────────────────────────────────
   pomodoroMode: PomodoroMode;
@@ -195,12 +227,13 @@ interface AppState {
   // ── Tasks ─────────────────────────────────────────────────────────────────
   tasks: Task[];
 
-  addTask: (text: string) => void;
+  addTask: (text: string, opts?: { dueDate?: string; linkedEventId?: string }) => string;
   toggleTask: (id: string) => void;
   deleteTask: (id: string) => void;
   editTask: (id: string, text: string) => void;
   reorderTasks: (from: number, to: number) => void;
   clearCompletedTasks: () => void;
+  syncDeadlineTasks: () => void; // Pulls deadline events into task list
 
   // ── Flashcards ────────────────────────────────────────────────────────────
   flashcardDecks: FlashcardDeck[];
@@ -237,12 +270,52 @@ export const useStore = create<AppState>()(
       theme: "dark" as Theme,
       soundType: "chime" as SoundType,
       soundVolume: 0.45,
+
+      // ── AI vendors ──────────────────────────────────────────────────────
+      aiVendor: "groq",
+      aiVendorConfigs: {
+        groq:      { apiKey: "", model: "llama-3.3-70b-versatile" },
+        openai:    { apiKey: "", model: "gpt-4o-mini" },
+        anthropic: { apiKey: "", model: "claude-haiku-4-5-20251001" },
+        ollama:    { apiKey: "", model: "llama3.2", baseUrl: "http://localhost:11434" },
+      },
+      setAIVendor: (aiVendor) => set({ aiVendor }),
+      setAIVendorConfig: (vendor, patch) =>
+        set((s) => ({
+          aiVendorConfigs: {
+            ...s.aiVendorConfigs,
+            [vendor]: { ...s.aiVendorConfigs[vendor], ...patch },
+          },
+        })),
+
       setActiveModule: (activeModule) => set({ activeModule }),
-      setApiKey: (apiKey) => set({ apiKey }),
-      setGroqModel: (groqModel) => set({ groqModel }),
+      setApiKey: (apiKey) =>
+        set((s) => ({
+          apiKey,
+          aiVendorConfigs: {
+            ...s.aiVendorConfigs,
+            groq: { ...s.aiVendorConfigs.groq, apiKey },
+          },
+        })),
+      setGroqModel: (groqModel) =>
+        set((s) => ({
+          groqModel,
+          aiVendorConfigs: {
+            ...s.aiVendorConfigs,
+            groq: { ...s.aiVendorConfigs.groq, model: groqModel },
+          },
+        })),
       setTheme: (theme) => set({ theme }),
       setSoundType: (soundType) => set({ soundType }),
       setSoundVolume: (soundVolume) => set({ soundVolume }),
+
+      // ── Misc settings ───────────────────────────────────────────────────
+      autoSyncDeadlines: true,
+      setAutoSyncDeadlines: (autoSyncDeadlines) => set({ autoSyncDeadlines }),
+      showWeekNumbers: false,
+      setShowWeekNumbers: (showWeekNumbers) => set({ showWeekNumbers }),
+      weekStartsOn: 1,
+      setWeekStartsOn: (weekStartsOn) => set({ weekStartsOn }),
 
       // ── Pomodoro ────────────────────────────────────────────────────────
       pomodoroMode: "work",
@@ -607,18 +680,23 @@ export const useStore = create<AppState>()(
       // ── Tasks ───────────────────────────────────────────────────────────
       tasks: [],
 
-      addTask: (text) =>
+      addTask: (text, opts) => {
+        const id = uid();
         set((s) => ({
           tasks: [
             ...s.tasks,
             {
-              id: uid(),
+              id,
               text,
               completed: false,
               createdAt: new Date().toISOString(),
+              dueDate: opts?.dueDate,
+              linkedEventId: opts?.linkedEventId,
             },
           ],
-        })),
+        }));
+        return id;
+      },
       toggleTask: (id) => {
         set((s) => ({
           tasks: s.tasks.map((t) =>
@@ -643,6 +721,52 @@ export const useStore = create<AppState>()(
         }),
       clearCompletedTasks: () =>
         set((s) => ({ tasks: s.tasks.filter((t) => !t.completed) })),
+
+      syncDeadlineTasks: () => {
+        const s = get();
+        if (!s.autoSyncDeadlines) return;
+
+        // Collect existing deadline-linked tasks
+        const linkedTaskByEvent = new Map<string, Task>();
+        for (const t of s.tasks) {
+          if (t.linkedEventId) linkedTaskByEvent.set(t.linkedEventId, t);
+        }
+
+        const updatedTasks: Task[] = [...s.tasks];
+        const deadlineEventIds = new Set<string>();
+
+        for (const e of s.calendarEvents) {
+          if (!e.isDeadline) continue;
+          deadlineEventIds.add(e.id);
+          const existing = linkedTaskByEvent.get(e.id);
+          if (existing) {
+            // Update title/dueDate if changed
+            if (existing.text !== e.title || existing.dueDate !== e.start) {
+              const idx = updatedTasks.findIndex((t) => t.id === existing.id);
+              if (idx >= 0) {
+                updatedTasks[idx] = { ...existing, text: e.title, dueDate: e.start };
+              }
+            }
+          } else {
+            // Create new task
+            updatedTasks.push({
+              id: uid(),
+              text: e.title,
+              completed: false,
+              createdAt: new Date().toISOString(),
+              dueDate: e.start,
+              linkedEventId: e.id,
+            });
+          }
+        }
+
+        // Remove tasks linked to events that are no longer deadlines or were deleted
+        const filtered = updatedTasks.filter(
+          (t) => !t.linkedEventId || deadlineEventIds.has(t.linkedEventId)
+        );
+
+        set({ tasks: filtered });
+      },
 
       // ── Flashcards ────────────────────────────────────────────────────────
       flashcardDecks: [],
@@ -775,6 +899,25 @@ export const useStore = create<AppState>()(
     }),
     {
       name: "hades-store",
+      version: 2,
+      // Migrate older persisted state to fit the new vendor-aware shape.
+      migrate: (persisted: any, version) => {
+        if (!persisted) return persisted;
+        if (version < 2) {
+          const legacyKey = persisted.apiKey ?? "";
+          const legacyModel = persisted.groqModel ?? "llama-3.3-70b-versatile";
+          if (!persisted.aiVendorConfigs) {
+            persisted.aiVendorConfigs = {
+              groq:      { apiKey: legacyKey, model: legacyModel },
+              openai:    { apiKey: "", model: "gpt-4o-mini" },
+              anthropic: { apiKey: "", model: "claude-haiku-4-5-20251001" },
+              ollama:    { apiKey: "", model: "llama3.2", baseUrl: "http://localhost:11434" },
+            };
+          }
+          if (!persisted.aiVendor) persisted.aiVendor = "groq";
+        }
+        return persisted;
+      },
       // Don't persist the running interval or loading state
       partialize: (s) => ({
         ...s,

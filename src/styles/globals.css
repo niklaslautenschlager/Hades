@@ -18,8 +18,9 @@
     --color-foreground: #f4f4f5;
     --color-foreground-secondary: #a1a1aa;
     --color-muted: #52525b;
-    --color-border: rgba(39, 39, 42, 0.5);
-    --color-border-active: rgba(82, 82, 91, 0.6);
+    --color-border: rgba(63, 63, 70, 0.85);
+    --color-border-active: rgba(113, 113, 122, 0.9);
+    --color-grid: rgba(82, 82, 91, 0.55);
     --color-card: #18181b;
     --color-card-hover: rgba(39, 39, 42, 0.4);
     --color-input: #18181b;
@@ -31,6 +32,7 @@
     --heatmap-mid: #52525b;
     --heatmap-high: #71717a;
     --heatmap-max: #d4d4d8;
+    --accent: #f4f4f5;
   }
 
   /* ─── Light theme ───────────────────────────────────────────────── */
@@ -43,6 +45,7 @@
     --color-muted: #a8a29e;
     --color-border: rgba(214, 211, 200, 0.8);
     --color-border-active: rgba(168, 162, 158, 0.6);
+    --color-grid: rgba(168, 162, 158, 0.45);
     --color-card: #f5f0e0;
     --color-card-hover: rgba(245, 240, 225, 0.6);
     --color-input: #ffffff;
@@ -54,6 +57,82 @@
     --heatmap-mid: #a1a1aa;
     --heatmap-high: #71717a;
     --heatmap-max: #3f3f46;
+    --accent: #1c1917;
+  }
+
+  /* ─── Catppuccin Mocha ──────────────────────────────────────────── */
+  [data-theme="catppuccin"] {
+    --color-surface: #1e1e2e;
+    --color-surface-hover: rgba(69, 71, 90, 0.6);
+    --color-surface-elevated: #313244;
+    --color-foreground: #cdd6f4;
+    --color-foreground-secondary: #bac2de;
+    --color-muted: #7f849c;
+    --color-border: rgba(88, 91, 112, 0.85);
+    --color-border-active: rgba(137, 180, 250, 0.7);
+    --color-grid: rgba(108, 112, 134, 0.6);
+    --color-card: #313244;
+    --color-card-hover: rgba(69, 71, 90, 0.45);
+    --color-input: #181825;
+    --color-input-border: #45475a;
+    --scrollbar-thumb: rgba(205, 214, 244, 0.12);
+    --scrollbar-hover: rgba(205, 214, 244, 0.2);
+    --selection: rgba(137, 180, 250, 0.2);
+    --heatmap-low: #45475a;
+    --heatmap-mid: #585b70;
+    --heatmap-high: #89b4fa;
+    --heatmap-max: #cba6f7;
+    --accent: #89b4fa;
+  }
+
+  /* ─── Gruvbox Dark ──────────────────────────────────────────────── */
+  [data-theme="gruvbox"] {
+    --color-surface: #282828;
+    --color-surface-hover: rgba(80, 73, 69, 0.6);
+    --color-surface-elevated: #32302f;
+    --color-foreground: #ebdbb2;
+    --color-foreground-secondary: #d5c4a1;
+    --color-muted: #928374;
+    --color-border: rgba(102, 92, 84, 0.85);
+    --color-border-active: rgba(189, 174, 147, 0.7);
+    --color-grid: rgba(124, 111, 100, 0.65);
+    --color-card: #32302f;
+    --color-card-hover: rgba(80, 73, 69, 0.45);
+    --color-input: #1d2021;
+    --color-input-border: #504945;
+    --scrollbar-thumb: rgba(235, 219, 178, 0.12);
+    --scrollbar-hover: rgba(235, 219, 178, 0.22);
+    --selection: rgba(250, 189, 47, 0.18);
+    --heatmap-low: #504945;
+    --heatmap-mid: #7c6f64;
+    --heatmap-high: #d79921;
+    --heatmap-max: #fabd2f;
+    --accent: #fabd2f;
+  }
+
+  /* ─── Nord ──────────────────────────────────────────────────────── */
+  [data-theme="nord"] {
+    --color-surface: #2e3440;
+    --color-surface-hover: rgba(76, 86, 106, 0.55);
+    --color-surface-elevated: #3b4252;
+    --color-foreground: #eceff4;
+    --color-foreground-secondary: #d8dee9;
+    --color-muted: #7b8494;
+    --color-border: rgba(76, 86, 106, 0.9);
+    --color-border-active: rgba(136, 192, 208, 0.7);
+    --color-grid: rgba(94, 105, 124, 0.6);
+    --color-card: #3b4252;
+    --color-card-hover: rgba(76, 86, 106, 0.4);
+    --color-input: #292e39;
+    --color-input-border: #4c566a;
+    --scrollbar-thumb: rgba(236, 239, 244, 0.12);
+    --scrollbar-hover: rgba(236, 239, 244, 0.2);
+    --selection: rgba(136, 192, 208, 0.2);
+    --heatmap-low: #4c566a;
+    --heatmap-mid: #5e81ac;
+    --heatmap-high: #88c0d0;
+    --heatmap-max: #a3be8c;
+    --accent: #88c0d0;
   }
 
   html,
@@ -102,6 +181,9 @@
   .border-border { border-color: var(--color-border); }
   .border-border-active { border-color: var(--color-border-active); }
   .border-input-border { border-color: var(--color-input-border); }
+  .border-grid { border-color: var(--color-grid); }
+  .bg-accent { background: var(--accent); }
+  .text-accent { color: var(--accent); }
 
   .surface {
     background: var(--color-card);
@@ -384,21 +466,46 @@
 
 /* ─── Command glow animation ─────────────────────────────────────── */
 @keyframes commandGlow {
-  0%, 100% { text-shadow: 0 0 8px rgba(244,244,245,0.3); }
-  50% { text-shadow: 0 0 16px rgba(244,244,245,0.5); }
+  0%, 100% {
+    text-shadow:
+      0 0 6px rgba(244,244,245,0.45),
+      0 0 14px rgba(244,244,245,0.25);
+    letter-spacing: 0;
+  }
+  50% {
+    text-shadow:
+      0 0 12px rgba(244,244,245,0.7),
+      0 0 22px rgba(244,244,245,0.35),
+      0 0 32px rgba(244,244,245,0.2);
+    letter-spacing: 0.01em;
+  }
 }
 
 [data-theme="light"] .command-glow {
-  animation: commandGlowLight 2s ease-in-out infinite;
+  animation: commandGlowLight 1.8s ease-in-out infinite;
 }
 
 @keyframes commandGlowLight {
-  0%, 100% { text-shadow: 0 0 8px rgba(28,25,23,0.2); }
-  50% { text-shadow: 0 0 16px rgba(28,25,23,0.35); }
+  0%, 100% {
+    text-shadow:
+      0 0 6px rgba(28,25,23,0.3),
+      0 0 12px rgba(28,25,23,0.12);
+  }
+  50% {
+    text-shadow:
+      0 0 10px rgba(28,25,23,0.5),
+      0 0 18px rgba(28,25,23,0.22);
+  }
 }
 
 .command-glow {
-  animation: commandGlow 2s ease-in-out infinite;
+  animation: commandGlow 1.8s ease-in-out infinite;
+}
+
+/* Inline highlight for slash-tokens inside the textarea */
+.command-token {
+  color: var(--accent);
+  text-shadow: 0 0 8px var(--accent), 0 0 18px var(--accent);
 }
 
 /* ─── Compact markdown for AI chat ──────────────────────────────── */

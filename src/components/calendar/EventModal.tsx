@@ -1,5 +1,5 @@
 import { useState, useRef } from "react";
-import { X, Trash2, ChevronUp, ChevronDown, Repeat } from "lucide-react";
+import { X, Trash2, ChevronUp, ChevronDown, Repeat, AlertCircle, Lock } from "lucide-react";
 import { motion } from "framer-motion";
 import { format, parseISO, addHours, addDays, addWeeks, addMonths } from "date-fns";
 import { useShallow } from "zustand/react/shallow";
@@ -8,6 +8,7 @@ import { useStore, type CalendarEvent, type RecurrenceRule } from "../../store/u
 interface Props {
   event?: CalendarEvent;
   defaultDate?: Date;
+  defaultEndDate?: Date;
   onClose: () => void;
 }
 
@@ -215,7 +216,7 @@ function RecurrenceEditor({
 
 // ─── Main Modal ──────────────────────────────────────────────────────────────
 
-export default function EventModal({ event, defaultDate, onClose }: Props) {
+export default function EventModal({ event, defaultDate, defaultEndDate, onClose }: Props) {
   const { addCalendarEvent, updateCalendarEvent, deleteCalendarEvent } = useStore(
     useShallow((s) => ({
       addCalendarEvent: s.addCalendarEvent,
@@ -224,8 +225,10 @@ export default function EventModal({ event, defaultDate, onClose }: Props) {
     }))
   );
 
+  const isReadOnly = event?.source === "ical";
+
   const defaultStart = defaultDate ?? new Date();
-  const defaultEnd = addHours(defaultStart, 1);
+  const defaultEnd = defaultEndDate ?? addHours(defaultStart, 1);
 
   const [title, setTitle] = useState(event?.title ?? "");
   const [start, setStart] = useState(
@@ -241,6 +244,7 @@ export default function EventModal({ event, defaultDate, onClose }: Props) {
   const [color, setColor] = useState(event?.color ?? COLORS[0]);
   const [description, setDescription] = useState(event?.description ?? "");
   const [recurrence, setRecurrence] = useState<RecurrenceRule | null>(event?.recurrence ?? null);
+  const [isDeadline, setIsDeadline] = useState(event?.isDeadline ?? false);
 
   function generateRecurringEvents(basePayload: Omit<CalendarEvent, "id">, rule: RecurrenceRule) {
     const events: Omit<CalendarEvent, "id">[] = [];
@@ -304,6 +308,10 @@ export default function EventModal({ event, defaultDate, onClose }: Props) {
   }
 
   function handleSubmit() {
+    if (isReadOnly) {
+      onClose();
+      return;
+    }
     if (!title.trim()) return;
     const basePayload = {
       title: title.trim(),
@@ -313,6 +321,7 @@ export default function EventModal({ event, defaultDate, onClose }: Props) {
       description,
       source: "local" as const,
       recurrence: recurrence ?? undefined,
+      isDeadline,
     };
 
     if (event) {
@@ -328,7 +337,7 @@ export default function EventModal({ event, defaultDate, onClose }: Props) {
   }
 
   function handleDelete() {
-    if (event) {
+    if (event && !isReadOnly) {
       deleteCalendarEvent(event.id);
       onClose();
     }
@@ -349,89 +358,136 @@ export default function EventModal({ event, defaultDate, onClose }: Props) {
       >
         {/* Header */}
         <div className="flex items-center justify-between mb-5">
-          <h2 className="text-base font-semibold text-foreground">
-            {event ? "Edit event" : "New event"}
+          <h2 className="text-base font-semibold text-foreground flex items-center gap-2">
+            {isReadOnly ? (
+              <>
+                <Lock className="w-4 h-4 text-muted" />
+                iCal Event (read-only)
+              </>
+            ) : (
+              event ? "Edit event" : "New event"
+            )}
           </h2>
           <button onClick={onClose} className="btn-ghost !p-1.5">
             <X className="w-4 h-4" />
           </button>
         </div>
 
+        {isReadOnly && (
+          <div className="mb-4 px-3 py-2 rounded-lg bg-surface-hover border border-border text-xs text-muted">
+            This event is synced from an iCal feed. Edit it in the source calendar — changes here would be overwritten on the next sync.
+          </div>
+        )}
+
         <div className="space-y-4">
           <div>
             <input
-              autoFocus
+              autoFocus={!isReadOnly}
+              readOnly={isReadOnly}
+              disabled={isReadOnly}
               type="text"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               placeholder="Event title"
-              className="input-base text-base font-medium"
+              className="input-base text-base font-medium disabled:opacity-70 disabled:cursor-not-allowed"
               onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
             />
           </div>
 
-          <DateTimePicker value={start} onChange={setStart} label="Start" />
-          <DateTimePicker value={end} onChange={setEnd} label="End" />
+          <fieldset disabled={isReadOnly} className={isReadOnly ? "opacity-70 pointer-events-none" : ""}>
+            <div className="space-y-4">
+              <DateTimePicker value={start} onChange={setStart} label="Start" />
+              <DateTimePicker value={end} onChange={setEnd} label="End" />
 
-          <div>
-            <label className="block text-xs text-muted mb-2">Color</label>
-            <div className="flex items-center gap-2">
-              {COLORS.map((c) => (
-                <button
-                  key={c}
-                  onClick={() => setColor(c)}
-                  className={`w-6 h-6 rounded-full transition-all duration-150
-                              ${color === c
-                                ? "ring-2 ring-offset-2 ring-offset-[var(--color-surface)] ring-foreground"
-                                : ""
-                              }`}
-                  style={{ backgroundColor: c }}
+              <div>
+                <label className="block text-xs text-muted mb-2">Color</label>
+                <div className="flex items-center gap-2">
+                  {COLORS.map((c) => (
+                    <button
+                      key={c}
+                      onClick={() => setColor(c)}
+                      className={`w-6 h-6 rounded-full transition-all duration-150
+                                  ${color === c
+                                    ? "ring-2 ring-offset-2 ring-offset-[var(--color-surface)] ring-foreground"
+                                    : ""
+                                  }`}
+                      style={{ backgroundColor: c }}
+                    />
+                  ))}
+                </div>
+              </div>
+
+              {/* Deadline toggle */}
+              <button
+                onClick={() => setIsDeadline((v) => !v)}
+                className={`flex items-center justify-between gap-3 w-full px-3 py-2 rounded-lg border
+                           text-left transition-all duration-150
+                           ${isDeadline
+                             ? "bg-red-950/30 border-red-900/40 text-foreground"
+                             : "border-border hover:border-border-active text-foreground-secondary"
+                           }`}
+              >
+                <div className="flex items-center gap-2">
+                  <AlertCircle className={`w-4 h-4 ${isDeadline ? "text-red-400" : "text-muted"}`} />
+                  <div>
+                    <div className="text-sm font-medium">Deadline</div>
+                    <div className="text-xs text-muted">Adds this to your to-do list automatically</div>
+                  </div>
+                </div>
+                <div
+                  className={`w-9 h-5 rounded-full relative transition-colors flex-shrink-0
+                              ${isDeadline ? "bg-red-500" : "bg-surface-hover"}`}
+                >
+                  <div
+                    className={`absolute top-0.5 w-4 h-4 rounded-full transition-all
+                                ${isDeadline ? "left-[18px] bg-white" : "left-0.5 bg-muted"}`}
+                  />
+                </div>
+              </button>
+
+              {/* Recurrence */}
+              {recurrence ? (
+                <RecurrenceEditor
+                  rule={recurrence}
+                  onChange={setRecurrence}
+                  onRemove={() => setRecurrence(null)}
                 />
-              ))}
+              ) : (
+                <button
+                  onClick={() =>
+                    setRecurrence({
+                      frequency: "weekly",
+                      interval: 1,
+                      daysOfWeek: [new Date(start).getDay()],
+                      endType: "after",
+                      endAfter: 4,
+                    })
+                  }
+                  className="flex items-center gap-2 w-full px-3 py-2.5 rounded-lg border border-dashed border-border
+                             text-sm text-muted hover:text-foreground-secondary hover:border-border-active transition-all"
+                >
+                  <Repeat className="w-3.5 h-3.5" />
+                  Add recurrence
+                </button>
+              )}
+
+              <div>
+                <label className="block text-xs text-muted mb-1">Description</label>
+                <textarea
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  placeholder="Optional notes..."
+                  rows={3}
+                  className="input-base resize-none text-sm"
+                />
+              </div>
             </div>
-          </div>
-
-          {/* Recurrence */}
-          {recurrence ? (
-            <RecurrenceEditor
-              rule={recurrence}
-              onChange={setRecurrence}
-              onRemove={() => setRecurrence(null)}
-            />
-          ) : (
-            <button
-              onClick={() =>
-                setRecurrence({
-                  frequency: "weekly",
-                  interval: 1,
-                  daysOfWeek: [new Date(start).getDay()],
-                  endType: "after",
-                  endAfter: 4,
-                })
-              }
-              className="flex items-center gap-2 w-full px-3 py-2.5 rounded-lg border border-dashed border-border
-                         text-sm text-muted hover:text-foreground-secondary hover:border-border-active transition-all"
-            >
-              <Repeat className="w-3.5 h-3.5" />
-              Add recurrence
-            </button>
-          )}
-
-          <div>
-            <label className="block text-xs text-muted mb-1">Description</label>
-            <textarea
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="Optional notes..."
-              rows={3}
-              className="input-base resize-none text-sm"
-            />
-          </div>
+          </fieldset>
         </div>
 
         <div className="flex items-center justify-between mt-5 pt-4 border-t border-border">
           <div>
-            {event && (
+            {event && !isReadOnly && (
               <button
                 onClick={handleDelete}
                 className="flex items-center gap-1.5 btn-ghost text-muted hover:text-red-400"
@@ -442,14 +498,16 @@ export default function EventModal({ event, defaultDate, onClose }: Props) {
             )}
           </div>
           <div className="flex items-center gap-3">
-            <button onClick={onClose} className="btn-ghost">Cancel</button>
-            <button
-              onClick={handleSubmit}
-              disabled={!title.trim()}
-              className="btn-primary"
-            >
-              {event ? "Update" : recurrence ? "Create All" : "Create"}
-            </button>
+            <button onClick={onClose} className="btn-ghost">{isReadOnly ? "Close" : "Cancel"}</button>
+            {!isReadOnly && (
+              <button
+                onClick={handleSubmit}
+                disabled={!title.trim()}
+                className="btn-primary"
+              >
+                {event ? "Update" : recurrence ? "Create All" : "Create"}
+              </button>
+            )}
           </div>
         </div>
       </motion.div>

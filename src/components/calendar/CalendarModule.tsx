@@ -8,6 +8,8 @@ import {
   CalendarDays,
   LayoutGrid,
   Rows3,
+  AlertCircle,
+  Lock,
 } from "lucide-react";
 import {
   format,
@@ -23,9 +25,9 @@ import {
   endOfWeek,
   eachDayOfInterval,
   isSameMonth,
-  isSameDay,
   isToday,
   parseISO,
+  getISOWeek,
 } from "date-fns";
 import { motion, AnimatePresence } from "framer-motion";
 import { useShallow } from "zustand/react/shallow";
@@ -57,7 +59,18 @@ const VIEW_LABELS: Record<CalendarView, string> = {
 };
 
 export default function CalendarModule() {
-  const { calendarEvents, calendarView, calendarDate, setCalendarView, setCalendarDate, clearAllCalendarEvents } = useStore(
+  const {
+    calendarEvents,
+    calendarView,
+    calendarDate,
+    setCalendarView,
+    setCalendarDate,
+    clearAllCalendarEvents,
+    weekStartsOn,
+    showWeekNumbers,
+    autoSyncDeadlines,
+    syncDeadlineTasks,
+  } = useStore(
     useShallow((s) => ({
       calendarEvents: s.calendarEvents,
       calendarView: s.calendarView,
@@ -65,14 +78,24 @@ export default function CalendarModule() {
       setCalendarView: s.setCalendarView,
       setCalendarDate: s.setCalendarDate,
       clearAllCalendarEvents: s.clearAllCalendarEvents,
+      weekStartsOn: s.weekStartsOn,
+      showWeekNumbers: s.showWeekNumbers,
+      autoSyncDeadlines: s.autoSyncDeadlines,
+      syncDeadlineTasks: s.syncDeadlineTasks,
     }))
   );
+
+  // Auto-sync deadlines to tasks whenever events change
+  useEffect(() => {
+    if (autoSyncDeadlines) syncDeadlineTasks();
+  }, [calendarEvents, autoSyncDeadlines, syncDeadlineTasks]);
 
   const currentDate = parseISO(calendarDate);
   const [eventModal, setEventModal] = useState<{
     open: boolean;
     event?: CalendarEvent;
     date?: Date;
+    endDate?: Date;
   }>({ open: false });
   const [icalModal, setIcalModal] = useState(false);
   const [confirmClear, setConfirmClear] = useState(false);
@@ -92,8 +115,8 @@ export default function CalendarModule() {
   function navLabel(): string {
     if (calendarView === "month") return format(currentDate, "MMMM yyyy");
     if (calendarView === "week") {
-      const wStart = startOfWeek(currentDate, { weekStartsOn: 1 });
-      const wEnd = endOfWeek(currentDate, { weekStartsOn: 1 });
+      const wStart = startOfWeek(currentDate, { weekStartsOn });
+      const wEnd = endOfWeek(currentDate, { weekStartsOn });
       return `${format(wStart, "MMM d")} – ${format(wEnd, "MMM d, yyyy")}`;
     }
     return format(currentDate, "EEEE, MMMM d, yyyy");
@@ -206,6 +229,8 @@ export default function CalendarModule() {
           <MonthView
             currentDate={currentDate}
             events={calendarEvents}
+            weekStartsOn={weekStartsOn}
+            showWeekNumbers={showWeekNumbers}
             onDayClick={(day) => setEventModal({ open: true, date: day })}
             onEventClick={(event) => setEventModal({ open: true, event })}
           />
@@ -214,7 +239,9 @@ export default function CalendarModule() {
           <WeekView
             currentDate={currentDate}
             events={calendarEvents}
+            weekStartsOn={weekStartsOn}
             onSlotClick={(date) => setEventModal({ open: true, date })}
+            onSlotDragCreate={(start, end) => setEventModal({ open: true, date: start, endDate: end })}
             onEventClick={(event) => setEventModal({ open: true, event })}
           />
         )}
@@ -223,6 +250,7 @@ export default function CalendarModule() {
             currentDate={currentDate}
             events={calendarEvents}
             onSlotClick={(date) => setEventModal({ open: true, date })}
+            onSlotDragCreate={(start, end) => setEventModal({ open: true, date: start, endDate: end })}
             onEventClick={(event) => setEventModal({ open: true, event })}
           />
         )}
@@ -234,6 +262,7 @@ export default function CalendarModule() {
           <EventModal
             event={eventModal.event}
             defaultDate={eventModal.date}
+            defaultEndDate={eventModal.endDate}
             onClose={() => setEventModal({ open: false })}
           />
         )}
@@ -243,17 +272,43 @@ export default function CalendarModule() {
   );
 }
 
-// ─── Now Indicator ──────────────────────────────────────────────────────────
+// ─── Now Indicator (single column - used in DayView) ────────────────────────
 
-function NowLine({ hourHeight }: { hourHeight: number }) {
+function NowLineSingle({ hourHeight }: { hourHeight: number }) {
   const now = useNow();
   const top = (now.getHours() + now.getMinutes() / 60) * hourHeight;
 
   return (
     <div className="absolute left-0 right-0 z-20 pointer-events-none" style={{ top }}>
       <div className="flex items-center">
-        <div className="w-2 h-2 rounded-full bg-red-500 -ml-1 flex-shrink-0" />
+        <div className="w-2 h-2 rounded-full bg-red-500 -ml-1 flex-shrink-0 shadow-[0_0_6px_rgba(239,68,68,0.6)]" />
         <div className="flex-1 h-[2px] bg-red-500" />
+      </div>
+    </div>
+  );
+}
+
+// ─── Now Indicator (entire week — stretches across all days) ────────────────
+
+function NowLineWeek({ hourHeight, todayIndex }: { hourHeight: number; todayIndex: number }) {
+  const now = useNow();
+  const top = (now.getHours() + now.getMinutes() / 60) * hourHeight;
+
+  return (
+    <div className="absolute left-0 right-0 z-20 pointer-events-none" style={{ top }}>
+      <div className="flex items-center w-full relative">
+        {/* Dot positioned at today's column */}
+        {todayIndex >= 0 && (
+          <div
+            className="absolute w-2.5 h-2.5 rounded-full bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.7)]"
+            style={{
+              left: `calc(${(todayIndex / 7) * 100}% - 5px)`,
+              top: -4,
+            }}
+          />
+        )}
+        {/* Line spans the whole week */}
+        <div className="flex-1 h-[2px] bg-red-500/80 shadow-[0_0_3px_rgba(239,68,68,0.5)]" />
       </div>
     </div>
   );
@@ -264,23 +319,38 @@ function NowLine({ hourHeight }: { hourHeight: number }) {
 interface MonthViewProps {
   currentDate: Date;
   events: CalendarEvent[];
+  weekStartsOn: 0 | 1;
+  showWeekNumbers: boolean;
   onDayClick: (day: Date) => void;
   onEventClick: (event: CalendarEvent) => void;
 }
 
-function MonthView({ currentDate, events, onDayClick, onEventClick }: MonthViewProps) {
+function MonthView({ currentDate, events, weekStartsOn, showWeekNumbers, onDayClick, onEventClick }: MonthViewProps) {
   const monthStart = startOfMonth(currentDate);
   const monthEnd = endOfMonth(currentDate);
-  const gridStart = startOfWeek(monthStart, { weekStartsOn: 1 });
-  const gridEnd = endOfWeek(monthEnd, { weekStartsOn: 1 });
+  const gridStart = startOfWeek(monthStart, { weekStartsOn });
+  const gridEnd = endOfWeek(monthEnd, { weekStartsOn });
   const days = eachDayOfInterval({ start: gridStart, end: gridEnd });
 
-  const DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+  const DAY_NAMES_MON = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+  const DAY_NAMES_SUN = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const dayNames = weekStartsOn === 1 ? DAY_NAMES_MON : DAY_NAMES_SUN;
+
+  // Build week rows for the week-number column
+  const weekRows: Date[][] = [];
+  for (let i = 0; i < days.length; i += 7) {
+    weekRows.push(days.slice(i, i + 7));
+  }
 
   return (
     <div className="flex flex-col h-full">
-      <div className="grid grid-cols-7 border-b border-border">
-        {DAY_NAMES.map((d) => (
+      <div className="grid border-b border-border" style={{
+        gridTemplateColumns: showWeekNumbers ? "40px repeat(7, 1fr)" : "repeat(7, 1fr)",
+      }}>
+        {showWeekNumbers && (
+          <div className="py-2 text-center text-xs font-medium text-muted tracking-wider">W</div>
+        )}
+        {dayNames.map((d) => (
           <div
             key={d}
             className="py-2 text-center text-xs font-medium text-muted tracking-wider"
@@ -290,57 +360,72 @@ function MonthView({ currentDate, events, onDayClick, onEventClick }: MonthViewP
         ))}
       </div>
 
-      <div className="flex-1 grid grid-cols-7 grid-rows-6 overflow-hidden">
-        {days.map((day, i) => {
-          const dayEvents = eventsOnDay(events, day);
-          const inMonth = isSameMonth(day, currentDate);
-          const today = isToday(day);
-
-          return (
-            <motion.div
-              key={i}
-              whileHover={{ backgroundColor: "var(--color-surface-hover)" }}
-              onClick={() => onDayClick(day)}
-              className={`
-                relative flex flex-col p-2 border-b border-r border-border
-                cursor-pointer overflow-hidden
-                ${!inMonth ? "opacity-30" : ""}
-              `}
-            >
-              <span
-                className={`
-                  self-start flex items-center justify-center w-6 h-6 rounded-full
-                  text-xs font-medium mb-1 transition-colors
-                  ${today
-                    ? "bg-foreground text-surface"
-                    : "text-foreground-secondary hover:text-foreground"
-                  }
-                `}
-              >
-                {format(day, "d")}
-              </span>
-
-              <div className="flex flex-col gap-0.5">
-                {dayEvents.slice(0, 3).map((event) => (
-                  <button
-                    key={event.id}
-                    onClick={(e) => { e.stopPropagation(); onEventClick(event); }}
-                    className="w-full text-left px-1.5 py-0.5 rounded text-xs
-                               text-zinc-200 truncate hover:brightness-110 transition-all"
-                    style={{ backgroundColor: event.color ?? "rgba(128,128,128,0.3)" }}
-                  >
-                    {event.title}
-                  </button>
-                ))}
-                {dayEvents.length > 3 && (
-                  <span className="text-xs text-muted px-1">
-                    +{dayEvents.length - 3} more
-                  </span>
-                )}
+      <div className="flex-1 grid grid-rows-6 overflow-hidden" style={{
+        gridTemplateColumns: showWeekNumbers ? "40px repeat(7, 1fr)" : "repeat(7, 1fr)",
+      }}>
+        {weekRows.map((row, rowIdx) => (
+          <div key={rowIdx} className="contents">
+            {showWeekNumbers && (
+              <div className="flex items-start justify-center pt-2 border-b border-r border-grid text-xs text-muted font-mono">
+                {getISOWeek(row[0])}
               </div>
-            </motion.div>
-          );
-        })}
+            )}
+            {row.map((day, i) => {
+              const dayEvents = eventsOnDay(events, day);
+              const inMonth = isSameMonth(day, currentDate);
+              const today = isToday(day);
+
+              return (
+                <motion.div
+                  key={`${rowIdx}-${i}`}
+                  whileHover={{ backgroundColor: "var(--color-surface-hover)" }}
+                  onClick={() => onDayClick(day)}
+                  className={`
+                    relative flex flex-col p-2 border-b border-r border-grid
+                    cursor-pointer overflow-hidden
+                    ${!inMonth ? "opacity-30" : ""}
+                  `}
+                >
+                  <span
+                    className={`
+                      self-start flex items-center justify-center w-6 h-6 rounded-full
+                      text-xs font-medium mb-1 transition-colors
+                      ${today
+                        ? "bg-foreground text-surface"
+                        : "text-foreground-secondary hover:text-foreground"
+                      }
+                    `}
+                  >
+                    {format(day, "d")}
+                  </span>
+
+                  <div className="flex flex-col gap-0.5">
+                    {dayEvents.slice(0, 3).map((event) => (
+                      <button
+                        key={event.id}
+                        onClick={(e) => { e.stopPropagation(); onEventClick(event); }}
+                        className="w-full text-left px-1.5 py-0.5 rounded text-xs
+                                   text-zinc-200 truncate hover:brightness-110 transition-all
+                                   flex items-center gap-1"
+                        style={{ backgroundColor: event.color ?? "rgba(128,128,128,0.3)" }}
+                        title={event.source === "ical" ? "iCal (read-only)" : event.title}
+                      >
+                        {event.isDeadline && <AlertCircle className="w-2.5 h-2.5 flex-shrink-0" />}
+                        {event.source === "ical" && <Lock className="w-2.5 h-2.5 flex-shrink-0 opacity-60" />}
+                        <span className="truncate">{event.title}</span>
+                      </button>
+                    ))}
+                    {dayEvents.length > 3 && (
+                      <span className="text-xs text-muted px-1">
+                        +{dayEvents.length - 3} more
+                      </span>
+                    )}
+                  </div>
+                </motion.div>
+              );
+            })}
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -351,22 +436,92 @@ function MonthView({ currentDate, events, onDayClick, onEventClick }: MonthViewP
 interface WeekViewProps {
   currentDate: Date;
   events: CalendarEvent[];
+  weekStartsOn: 0 | 1;
   onSlotClick: (date: Date) => void;
+  onSlotDragCreate: (start: Date, end: Date) => void;
   onEventClick: (event: CalendarEvent) => void;
 }
 
-function WeekView({ currentDate, events, onSlotClick, onEventClick }: WeekViewProps) {
-  const weekStart = startOfWeek(currentDate, { weekStartsOn: 1 });
+const HOUR_HEIGHT_WEEK = 48;
+
+function WeekView({ currentDate, events, weekStartsOn, onSlotClick, onSlotDragCreate, onEventClick }: WeekViewProps) {
+  const weekStart = startOfWeek(currentDate, { weekStartsOn });
   const days = eachDayOfInterval({ start: weekStart, end: addDays(weekStart, 6) });
   const hours = Array.from({ length: 24 }, (_, i) => i);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const gridContainerRef = useRef<HTMLDivElement>(null);
+
+  const todayIndex = days.findIndex((d) => isToday(d));
+
+  // Drag-to-create state
+  const [dragSel, setDragSel] = useState<{ dayIndex: number; startMin: number; endMin: number } | null>(null);
+  const dragRef = useRef<{ dayIndex: number; startMin: number } | null>(null);
 
   useEffect(() => {
     if (scrollRef.current) {
       const currentHour = new Date().getHours();
-      scrollRef.current.scrollTop = Math.max(0, (currentHour - 2) * 48);
+      scrollRef.current.scrollTop = Math.max(0, (currentHour - 2) * HOUR_HEIGHT_WEEK);
     }
   }, []);
+
+  function minutesFromY(y: number): number {
+    // Snap to 15-minute increments
+    const raw = (y / HOUR_HEIGHT_WEEK) * 60;
+    return Math.max(0, Math.min(24 * 60 - 15, Math.round(raw / 15) * 15));
+  }
+
+  function handleColumnPointerDown(e: React.PointerEvent, dayIndex: number) {
+    if ((e.target as HTMLElement).closest("[data-event]")) return;
+    const col = e.currentTarget as HTMLElement;
+    col.setPointerCapture(e.pointerId);
+    const rect = col.getBoundingClientRect();
+    const startMin = minutesFromY(e.clientY - rect.top);
+    dragRef.current = { dayIndex, startMin };
+    // No selection on click — only after drag passes threshold
+    setDragSel(null);
+  }
+
+  function handleColumnPointerMove(e: React.PointerEvent, dayIndex: number) {
+    if (!dragRef.current || dragRef.current.dayIndex !== dayIndex) return;
+    const col = e.currentTarget as HTMLElement;
+    const rect = col.getBoundingClientRect();
+    const curMin = minutesFromY(e.clientY - rect.top);
+    if (Math.abs(curMin - dragRef.current.startMin) < 15) return; // threshold
+    const start = Math.min(dragRef.current.startMin, curMin);
+    const end = Math.max(dragRef.current.startMin, curMin);
+    setDragSel({ dayIndex, startMin: start, endMin: Math.max(start + 15, end) });
+  }
+
+  function handleColumnPointerUp(e: React.PointerEvent, dayIndex: number) {
+    if (!dragRef.current || dragRef.current.dayIndex !== dayIndex) {
+      dragRef.current = null;
+      setDragSel(null);
+      return;
+    }
+    const col = e.currentTarget as HTMLElement;
+    const rect = col.getBoundingClientRect();
+    const endMin = minutesFromY(e.clientY - rect.top);
+    const startMin = dragRef.current.startMin;
+    dragRef.current = null;
+
+    const day = days[dayIndex];
+    if (Math.abs(endMin - startMin) < 15) {
+      // Click — open at clicked time
+      const d = new Date(day);
+      d.setHours(Math.floor(startMin / 60), startMin % 60, 0, 0);
+      onSlotClick(d);
+    } else {
+      // Drag-create
+      const sMin = Math.min(startMin, endMin);
+      const eMin = Math.max(startMin, endMin);
+      const s = new Date(day);
+      s.setHours(Math.floor(sMin / 60), sMin % 60, 0, 0);
+      const en = new Date(day);
+      en.setHours(Math.floor(eMin / 60), eMin % 60, 0, 0);
+      onSlotDragCreate(s, en);
+    }
+    setDragSel(null);
+  }
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -375,7 +530,7 @@ function WeekView({ currentDate, events, onSlotClick, onEventClick }: WeekViewPr
         {days.map((day) => (
           <div
             key={day.toISOString()}
-            className="flex-1 py-2.5 text-center border-l border-border"
+            className="flex-1 py-2.5 text-center border-l border-grid"
           >
             <div className="text-xs font-medium text-muted uppercase tracking-wider">
               {format(day, "EEE")}
@@ -388,7 +543,7 @@ function WeekView({ currentDate, events, onSlotClick, onEventClick }: WeekViewPr
       </div>
 
       <div ref={scrollRef} className="flex-1 overflow-y-auto">
-        <div className="flex">
+        <div className="flex relative" ref={gridContainerRef}>
           <div className="w-14 flex-shrink-0">
             {hours.map((h) => (
               <div key={h} className="h-12 flex items-start justify-end pr-2 pt-0.5">
@@ -399,51 +554,75 @@ function WeekView({ currentDate, events, onSlotClick, onEventClick }: WeekViewPr
             ))}
           </div>
 
-          {days.map((day) => {
-            const dayEvents = eventsOnDay(events, day);
-            const showNow = isToday(day);
-            return (
-              <div key={day.toISOString()} className="flex-1 relative border-l border-border">
-                {hours.map((h) => (
-                  <div
-                    key={h}
-                    onClick={() => {
-                      const d = new Date(day);
-                      d.setHours(h, 0, 0, 0);
-                      onSlotClick(d);
-                    }}
-                    className="h-12 border-b border-border hover:bg-surface-hover cursor-pointer transition-colors"
-                    style={{ borderBottomColor: "var(--color-border)" }}
-                  />
-                ))}
-                {showNow && <NowLine hourHeight={48} />}
-                {dayEvents.map((event) => {
-                  const start = parseISO(event.start);
-                  const end = parseISO(event.end);
-                  const top = (start.getHours() + start.getMinutes() / 60) * 48;
-                  const height = Math.max(
-                    ((end.getTime() - start.getTime()) / 3600000) * 48,
-                    24
-                  );
-                  return (
-                    <button
-                      key={event.id}
-                      onClick={() => onEventClick(event)}
-                      className="absolute left-0.5 right-0.5 rounded-md px-1.5 py-0.5 text-left
-                                 text-xs text-zinc-100 hover:brightness-110 transition-all overflow-hidden z-10"
+          {/* Day columns — wrapped together so the now-line can stretch across them */}
+          <div className="flex-1 flex relative">
+            {days.map((day, dayIndex) => {
+              const dayEvents = eventsOnDay(events, day);
+              return (
+                <div
+                  key={day.toISOString()}
+                  className="flex-1 relative border-l border-grid touch-none select-none"
+                  onPointerDown={(e) => handleColumnPointerDown(e, dayIndex)}
+                  onPointerMove={(e) => handleColumnPointerMove(e, dayIndex)}
+                  onPointerUp={(e) => handleColumnPointerUp(e, dayIndex)}
+                  onPointerCancel={() => { dragRef.current = null; setDragSel(null); }}
+                >
+                  {hours.map((h) => (
+                    <div
+                      key={h}
+                      className="h-12 border-b border-grid hover:bg-surface-hover transition-colors"
+                    />
+                  ))}
+                  {dayEvents.map((event) => {
+                    const start = parseISO(event.start);
+                    const end = parseISO(event.end);
+                    const top = (start.getHours() + start.getMinutes() / 60) * HOUR_HEIGHT_WEEK;
+                    const height = Math.max(
+                      ((end.getTime() - start.getTime()) / 3600000) * HOUR_HEIGHT_WEEK,
+                      24
+                    );
+                    return (
+                      <button
+                        key={event.id}
+                        data-event
+                        onClick={(e) => { e.stopPropagation(); onEventClick(event); }}
+                        className="absolute left-0.5 right-0.5 rounded-md px-1.5 py-0.5 text-left
+                                   text-xs text-zinc-100 hover:brightness-110 transition-all overflow-hidden z-10
+                                   flex items-start gap-1"
+                        style={{
+                          top,
+                          height,
+                          backgroundColor: event.color ?? "rgba(128,128,128,0.3)",
+                        }}
+                        title={event.source === "ical" ? `${event.title} (iCal — read-only)` : event.title}
+                      >
+                        {event.isDeadline && <AlertCircle className="w-3 h-3 flex-shrink-0 mt-0.5" />}
+                        {event.source === "ical" && <Lock className="w-3 h-3 flex-shrink-0 mt-0.5 opacity-60" />}
+                        <span className="font-medium truncate flex-1">{event.title}</span>
+                      </button>
+                    );
+                  })}
+                  {/* Drag selection preview */}
+                  {dragSel && dragSel.dayIndex === dayIndex && (
+                    <div
+                      className="absolute left-0.5 right-0.5 rounded-md bg-accent/30 border border-accent z-15 pointer-events-none"
                       style={{
-                        top,
-                        height,
-                        backgroundColor: event.color ?? "rgba(128,128,128,0.3)",
+                        top: (dragSel.startMin / 60) * HOUR_HEIGHT_WEEK,
+                        height: ((dragSel.endMin - dragSel.startMin) / 60) * HOUR_HEIGHT_WEEK,
                       }}
                     >
-                      <span className="font-medium truncate">{event.title}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            );
-          })}
+                      <div className="px-1.5 py-0.5 text-xs text-foreground font-medium">
+                        {String(Math.floor(dragSel.startMin / 60)).padStart(2, "0")}:{String(dragSel.startMin % 60).padStart(2, "0")} – {String(Math.floor(dragSel.endMin / 60)).padStart(2, "0")}:{String(dragSel.endMin % 60).padStart(2, "0")}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+
+            {/* Now-line — spans the whole week */}
+            <NowLineWeek hourHeight={HOUR_HEIGHT_WEEK} todayIndex={todayIndex} />
+          </div>
         </div>
       </div>
     </div>
@@ -456,25 +635,81 @@ interface DayViewProps {
   currentDate: Date;
   events: CalendarEvent[];
   onSlotClick: (date: Date) => void;
+  onSlotDragCreate: (start: Date, end: Date) => void;
   onEventClick: (event: CalendarEvent) => void;
 }
 
-function DayView({ currentDate, events, onSlotClick, onEventClick }: DayViewProps) {
+const HOUR_HEIGHT_DAY = 64;
+
+function DayView({ currentDate, events, onSlotClick, onSlotDragCreate, onEventClick }: DayViewProps) {
   const dayEvents = eventsOnDay(events, currentDate);
   const hours = Array.from({ length: 24 }, (_, i) => i);
   const showNow = isToday(currentDate);
   const scrollRef = useRef<HTMLDivElement>(null);
 
+  const [dragSel, setDragSel] = useState<{ startMin: number; endMin: number } | null>(null);
+  const dragRef = useRef<{ startMin: number } | null>(null);
+
   useEffect(() => {
     if (scrollRef.current) {
       const currentHour = new Date().getHours();
-      scrollRef.current.scrollTop = Math.max(0, (currentHour - 2) * 64);
+      scrollRef.current.scrollTop = Math.max(0, (currentHour - 2) * HOUR_HEIGHT_DAY);
     }
   }, []);
 
+  function minutesFromY(y: number): number {
+    const raw = (y / HOUR_HEIGHT_DAY) * 60;
+    return Math.max(0, Math.min(24 * 60 - 15, Math.round(raw / 15) * 15));
+  }
+
+  function handlePointerDown(e: React.PointerEvent) {
+    if ((e.target as HTMLElement).closest("[data-event]")) return;
+    const col = e.currentTarget as HTMLElement;
+    col.setPointerCapture(e.pointerId);
+    const rect = col.getBoundingClientRect();
+    const startMin = minutesFromY(e.clientY - rect.top + col.scrollTop);
+    dragRef.current = { startMin };
+    setDragSel(null);
+  }
+
+  function handlePointerMove(e: React.PointerEvent) {
+    if (!dragRef.current) return;
+    const col = e.currentTarget as HTMLElement;
+    const rect = col.getBoundingClientRect();
+    const curMin = minutesFromY(e.clientY - rect.top + col.scrollTop);
+    if (Math.abs(curMin - dragRef.current.startMin) < 15) return;
+    const start = Math.min(dragRef.current.startMin, curMin);
+    const end = Math.max(dragRef.current.startMin, curMin);
+    setDragSel({ startMin: start, endMin: Math.max(start + 15, end) });
+  }
+
+  function handlePointerUp(e: React.PointerEvent) {
+    if (!dragRef.current) return;
+    const col = e.currentTarget as HTMLElement;
+    const rect = col.getBoundingClientRect();
+    const endMin = minutesFromY(e.clientY - rect.top + col.scrollTop);
+    const startMin = dragRef.current.startMin;
+    dragRef.current = null;
+
+    if (Math.abs(endMin - startMin) < 15) {
+      const d = new Date(currentDate);
+      d.setHours(Math.floor(startMin / 60), startMin % 60, 0, 0);
+      onSlotClick(d);
+    } else {
+      const sMin = Math.min(startMin, endMin);
+      const eMin = Math.max(startMin, endMin);
+      const s = new Date(currentDate);
+      s.setHours(Math.floor(sMin / 60), sMin % 60, 0, 0);
+      const en = new Date(currentDate);
+      en.setHours(Math.floor(eMin / 60), eMin % 60, 0, 0);
+      onSlotDragCreate(s, en);
+    }
+    setDragSel(null);
+  }
+
   return (
     <div className="flex h-full overflow-hidden">
-      <div className="w-20 flex-shrink-0 overflow-y-auto border-r border-border">
+      <div className="w-20 flex-shrink-0 overflow-y-auto border-r border-grid">
         {hours.map((h) => (
           <div key={h} className="h-16 flex items-start justify-end pr-3 pt-1">
             <span className="text-xs text-muted font-mono">
@@ -484,31 +719,31 @@ function DayView({ currentDate, events, onSlotClick, onEventClick }: DayViewProp
         ))}
       </div>
 
-      <div ref={scrollRef} className="flex-1 relative overflow-y-auto">
+      <div
+        ref={scrollRef}
+        className="flex-1 relative overflow-y-auto touch-none select-none"
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={() => { dragRef.current = null; setDragSel(null); }}
+      >
         {hours.map((h) => (
-          <div
-            key={h}
-            onClick={() => {
-              const d = new Date(currentDate);
-              d.setHours(h, 0, 0, 0);
-              onSlotClick(d);
-            }}
-            className="h-16 border-b border-border hover:bg-surface-hover cursor-pointer transition-colors"
-          />
+          <div key={h} className="h-16 border-b border-grid hover:bg-surface-hover transition-colors" />
         ))}
-        {showNow && <NowLine hourHeight={64} />}
+        {showNow && <NowLineSingle hourHeight={HOUR_HEIGHT_DAY} />}
         {dayEvents.map((event) => {
           const start = parseISO(event.start);
           const end = parseISO(event.end);
-          const top = (start.getHours() + start.getMinutes() / 60) * 64;
+          const top = (start.getHours() + start.getMinutes() / 60) * HOUR_HEIGHT_DAY;
           const height = Math.max(
-            ((end.getTime() - start.getTime()) / 3600000) * 64,
+            ((end.getTime() - start.getTime()) / 3600000) * HOUR_HEIGHT_DAY,
             32
           );
           return (
             <button
               key={event.id}
-              onClick={() => onEventClick(event)}
+              data-event
+              onClick={(e) => { e.stopPropagation(); onEventClick(event); }}
               className="absolute left-2 right-2 rounded-lg px-3 py-1.5 text-left
                          hover:brightness-110 transition-all overflow-hidden z-10"
               style={{
@@ -516,14 +751,33 @@ function DayView({ currentDate, events, onSlotClick, onEventClick }: DayViewProp
                 height,
                 backgroundColor: event.color ?? "rgba(128,128,128,0.3)",
               }}
+              title={event.source === "ical" ? `${event.title} (iCal — read-only)` : event.title}
             >
-              <div className="text-sm font-medium text-zinc-100 truncate">{event.title}</div>
+              <div className="text-sm font-medium text-zinc-100 truncate flex items-center gap-1.5">
+                {event.isDeadline && <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" />}
+                {event.source === "ical" && <Lock className="w-3.5 h-3.5 flex-shrink-0 opacity-60" />}
+                <span className="truncate">{event.title}</span>
+              </div>
               <div className="text-xs text-zinc-300/70">
                 {format(start, "HH:mm")} – {format(end, "HH:mm")}
               </div>
             </button>
           );
         })}
+        {/* Drag selection preview */}
+        {dragSel && (
+          <div
+            className="absolute left-2 right-2 rounded-lg bg-accent/30 border border-accent z-15 pointer-events-none"
+            style={{
+              top: (dragSel.startMin / 60) * HOUR_HEIGHT_DAY,
+              height: ((dragSel.endMin - dragSel.startMin) / 60) * HOUR_HEIGHT_DAY,
+            }}
+          >
+            <div className="px-3 py-1 text-xs text-foreground font-medium">
+              {String(Math.floor(dragSel.startMin / 60)).padStart(2, "0")}:{String(dragSel.startMin % 60).padStart(2, "0")} – {String(Math.floor(dragSel.endMin / 60)).padStart(2, "0")}:{String(dragSel.endMin % 60).padStart(2, "0")}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
