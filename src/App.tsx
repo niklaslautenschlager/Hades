@@ -5,6 +5,10 @@ import Shell from "./components/layout/Shell";
 import CalendarModule from "./components/calendar/CalendarModule";
 import PomodoroModule from "./components/pomodoro/PomodoroModule";
 import TasksModule from "./components/tasks/TasksModule";
+import SyncOverlay from "./components/SyncOverlay";
+import { useSyncTimer } from "./hooks/useSyncTimer";
+import { useStartupSync } from "./hooks/useStartupSync";
+import { useQuitGuard } from "./hooks/useQuitGuard";
 
 // Lazy-load heavy modules
 const NotepadModule = lazy(() => import("./components/notepad/NotepadModule"));
@@ -21,7 +25,10 @@ export default function App() {
   const activeModule = useStore((s) => s.activeModule);
   const theme = useStore((s) => s.theme);
 
-  // Apply theme class to root element
+  useSyncTimer();
+  useStartupSync();
+  useQuitGuard();
+
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
   }, [theme]);
@@ -58,6 +65,7 @@ export default function App() {
           )}
         </motion.div>
       </AnimatePresence>
+      <SyncOverlay />
     </Shell>
   );
 }

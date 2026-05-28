@@ -1,82 +1,64 @@
+import { open } from "@tauri-apps/plugin-dialog";
+import { readDir, readTextFile } from "@tauri-apps/plugin-fs";
+
 interface ImportedFile {
   name: string;
   content: string;
-  parentKey: string | null;  // key reference to parent folder (used for mapping)
-  selfKey: string | null;    // this item's own key (only for folders)
+  parentKey: string | null;
+  selfKey: string | null;
   isFolder: boolean;
 }
 
 /**
- * Import files from a directory picker (Obsidian vault compatible).
- * Handles folder structure by reading webkitRelativePath.
- *
- * Each folder gets a stable `selfKey` (its path) and notes reference
- * their parent folder via `parentKey`. The store's importNotes function
- * uses these keys to build the correct hierarchy.
+ * Opens a native folder picker and recursively imports all .md/.txt files.
+ * Returns null if the user cancelled.
  */
-export async function importObsidianVault(fileList: FileList): Promise<ImportedFile[]> {
+export async function importObsidianVault(): Promise<ImportedFile[] | null> {
+  const selected = await open({ directory: true, multiple: false });
+  if (!selected || typeof selected !== "string") return null;
+
   const result: ImportedFile[] = [];
-  const seenFolders = new Set<string>();
-
-  // Sort files so shallow paths come first
-  const files = Array.from(fileList).sort((a, b) => {
-    const aDepth = (a.webkitRelativePath || a.name).split("/").length;
-    const bDepth = (b.webkitRelativePath || b.name).split("/").length;
-    return aDepth - bDepth;
-  });
-
-  for (const file of files) {
-    // Only process markdown and text files
-    if (!file.name.endsWith(".md") && !file.name.endsWith(".txt")) continue;
-    // Skip hidden files and Obsidian config
-    if (file.name.startsWith(".")) continue;
-
-    const relativePath = file.webkitRelativePath || file.name;
-    const parts = relativePath.split("/");
-
-    // Skip the root vault folder name
-    const pathParts = parts.length > 1 ? parts.slice(1) : parts;
-    const folderParts = pathParts.slice(0, -1);
-
-    // Create folder entries for each level in the path
-    for (let i = 0; i < folderParts.length; i++) {
-      const folderPath = folderParts.slice(0, i + 1).join("/");
-      if (!seenFolders.has(folderPath)) {
-        seenFolders.add(folderPath);
-        const parentPath = i > 0 ? folderParts.slice(0, i).join("/") : null;
-        result.push({
-          name: folderParts[i],
-          content: "",
-          parentKey: parentPath, // null for root-level folders
-          selfKey: folderPath,   // e.g. "notes", "notes/subfolder"
-          isFolder: true,
-        });
-      }
-    }
-
-    // Read file content
-    const content = await readFileAsText(file);
-    const fileName = pathParts[pathParts.length - 1];
-    const noteName = fileName.replace(/\.(md|txt)$/, "");
-    const parentPath = folderParts.length > 0 ? folderParts.join("/") : null;
-
-    result.push({
-      name: noteName,
-      content,
-      parentKey: parentPath,
-      selfKey: null,
-      isFolder: false,
-    });
-  }
-
-  return result;
+  await collectEntries(selected, selected, null, result);
+  return result.length > 0 ? result : null;
 }
 
-function readFileAsText(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result as string);
-    reader.onerror = reject;
-    reader.readAsText(file);
-  });
+async function collectEntries(
+  rootPath: string,
+  dirPath: string,
+  parentKey: string | null,
+  result: ImportedFile[]
+): Promise<void> {
+  const entries = await readDir(dirPath);
+
+  for (const entry of entries) {
+    if (entry.name.startsWith(".")) continue;
+
+    const fullPath = `${dirPath}/${entry.name}`;
+
+    if (entry.isDirectory) {
+      // Stable key relative to vault root
+      const selfKey = fullPath.slice(rootPath.length + 1);
+      result.push({
+        name: entry.name,
+        content: "",
+        parentKey,
+        selfKey,
+        isFolder: true,
+      });
+      await collectEntries(rootPath, fullPath, selfKey, result);
+    } else if (
+      entry.isFile &&
+      (entry.name.endsWith(".md") || entry.name.endsWith(".txt"))
+    ) {
+      const content = await readTextFile(fullPath);
+      const noteName = entry.name.replace(/\.(md|txt)$/, "");
+      result.push({
+        name: noteName,
+        content,
+        parentKey,
+        selfKey: null,
+        isFolder: false,
+      });
+    }
+  }
 }

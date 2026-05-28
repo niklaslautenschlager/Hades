@@ -46,8 +46,6 @@ export default function NotepadModule() {
   const [showExportMenu, setShowExportMenu] = useState(false);
   const [showSidebar, setShowSidebar] = useState(true);
   const [showCalculator, setShowCalculator] = useState(false);
-  const importRef = useRef<HTMLInputElement>(null);
-
   const wordCount = useMemo(
     () => activeNote?.content.trim().split(/\s+/).filter(Boolean).length ?? 0,
     [activeNote?.content]
@@ -133,16 +131,11 @@ export default function NotepadModule() {
     setShowExportMenu(false);
   }
 
-  async function handleImport(e: React.ChangeEvent<HTMLInputElement>) {
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
-
-    const imported = await importObsidianVault(files);
-    if (imported.length > 0) {
+  async function handleImport() {
+    const imported = await importObsidianVault();
+    if (imported && imported.length > 0) {
       importNotes(imported);
     }
-    // Reset input
-    if (importRef.current) importRef.current.value = "";
   }
 
   return (
@@ -298,7 +291,7 @@ export default function NotepadModule() {
 
                 {/* Import */}
                 <button
-                  onClick={() => importRef.current?.click()}
+                  onClick={handleImport}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium
                              text-muted hover:text-foreground-secondary hover:bg-surface-hover transition-all"
                   title="Import notes (Obsidian compatible)"
@@ -306,15 +299,6 @@ export default function NotepadModule() {
                   <FileUp className="w-3.5 h-3.5" />
                   Import
                 </button>
-                <input
-                  ref={importRef}
-                  type="file"
-                  multiple
-                  accept=".md,.txt"
-                  onChange={handleImport}
-                  className="hidden"
-                  {...({ webkitdirectory: "", directory: "" } as any)}
-                />
 
                 {/* Preview / Edit toggle */}
                 <button

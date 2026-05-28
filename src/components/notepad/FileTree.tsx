@@ -33,6 +33,22 @@ function tagColor(tag: string) {
   return TAG_COLORS[TAG_COLOR_KEYS[Math.abs(hash) % TAG_COLOR_KEYS.length]];
 }
 
+// Leading-number prefix like "1. ", "2) ", "03 - " etc.
+const LEADING_NUM_RE = /^(\d+)[.\-)\s]/;
+
+function sortFiles(files: NoteFile[]): NoteFile[] {
+  return [...files].sort((a, b) => {
+    const aMatch = LEADING_NUM_RE.exec(a.name);
+    const bMatch = LEADING_NUM_RE.exec(b.name);
+    if (aMatch && bMatch) return parseInt(aMatch[1]) - parseInt(bMatch[1]);
+    if (aMatch) return -1;
+    if (bMatch) return 1;
+    const aTime = a.createdAt ?? "";
+    const bTime = b.createdAt ?? "";
+    return aTime < bTime ? -1 : aTime > bTime ? 1 : a.name.localeCompare(b.name);
+  });
+}
+
 function isDescendant(notes: NoteFile[], targetId: string, draggedId: string): boolean {
   let node = notes.find((n) => n.id === targetId);
   while (node?.parentId) {
@@ -94,7 +110,7 @@ function FileNode({ file, depth, allFiles }: FileNodeProps) {
   const [isDropTarget, setIsDropTarget] = useState(false);
   const rowRef = useRef<HTMLDivElement>(null);
 
-  const children = allFiles.filter((f) => f.parentId === file.id);
+  const children = sortFiles(allFiles.filter((f) => f.parentId === file.id));
   const isActive = activeNoteId === file.id;
 
   const firstTag = !file.isFolder && file.tags.length > 0 ? file.tags[0] : null;
@@ -417,7 +433,7 @@ export default function FileTree() {
       })()
     : {};
 
-  const rootFiles = notes.filter((f) => f.parentId === null);
+  const rootFiles = sortFiles(notes.filter((f) => f.parentId === null));
 
   // Handle pointer-based root drop (items dragged to empty area → move to root)
   function handleRootPointerUp(e: React.PointerEvent) {

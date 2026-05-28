@@ -35,6 +35,10 @@
       "allow": [{ "path": "**" }]
     },
     {
+      "identifier": "fs:allow-read-text-file",
+      "allow": [{ "path": "**" }]
+    },
+    {
       "identifier": "fs:allow-read-dir",
       "allow": [{ "path": "**" }]
     },

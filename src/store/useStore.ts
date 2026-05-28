@@ -250,6 +250,27 @@ interface AppState {
   // ── Focus Stats ───────────────────────────────────────────────────────────
   focusSessions: FocusSession[];
   recordFocusTime: (seconds: number) => void;
+
+  // ── Cloud Sync (persisted) ─────────────────────────────────────────────────
+  syncFolder: string | null;
+  syncEnabled: boolean;
+  lastSyncAt: string | null;
+  setSyncFolder: (path: string | null) => void;
+  setSyncEnabled: (v: boolean) => void;
+  setLastSyncAt: (ts: string | null) => void;
+
+  // ── Sync runtime (ephemeral, not persisted) ────────────────────────────────
+  isSyncing: boolean;
+  hasPendingChanges: boolean;
+  quitPending: boolean;
+  forceQuit: boolean;
+  syncError: string | null;
+  setIsSyncing: (v: boolean) => void;
+  setHasPendingChanges: (v: boolean) => void;
+  setQuitPending: (v: boolean) => void;
+  setForceQuit: (v: boolean) => void;
+  setSyncError: (msg: string | null) => void;
+  applyMergedNotes: (notes: NoteFile[]) => void;
 }
 
 function uid(): string {
@@ -567,6 +588,7 @@ export const useStore = create<AppState>()(
             },
           ],
           activeNoteId: id,
+          hasPendingChanges: s.syncEnabled ? true : s.hasPendingChanges,
         }));
         return id;
       },
@@ -586,6 +608,7 @@ export const useStore = create<AppState>()(
               updatedAt: new Date().toISOString(),
             },
           ],
+          hasPendingChanges: s.syncEnabled ? true : s.hasPendingChanges,
         }));
       },
       updateNote: (id, patch) =>
@@ -595,6 +618,7 @@ export const useStore = create<AppState>()(
               ? { ...n, ...patch, updatedAt: new Date().toISOString() }
               : n
           ),
+          hasPendingChanges: s.syncEnabled ? true : s.hasPendingChanges,
         })),
       deleteNote: (id) =>
         set((s) => {
@@ -617,8 +641,9 @@ export const useStore = create<AppState>()(
       moveNote: (id, newParentId) =>
         set((s) => ({
           notes: s.notes.map((n) =>
-            n.id === id ? { ...n, parentId: newParentId } : n
+            n.id === id ? { ...n, parentId: newParentId, updatedAt: new Date().toISOString() } : n
           ),
+          hasPendingChanges: s.syncEnabled ? true : s.hasPendingChanges,
         })),
       setActiveNote: (activeNoteId) => set({ activeNoteId }),
       toggleVimMode: () => set((s) => ({ isVimMode: !s.isVimMode })),
@@ -896,11 +921,30 @@ export const useStore = create<AppState>()(
           };
         });
       },
+
+      // ── Cloud Sync ───────────────────────────────────────────────────────
+      syncFolder: null,
+      syncEnabled: false,
+      lastSyncAt: null,
+      setSyncFolder: (syncFolder) => set({ syncFolder }),
+      setSyncEnabled: (syncEnabled) => set({ syncEnabled }),
+      setLastSyncAt: (lastSyncAt) => set({ lastSyncAt }),
+
+      isSyncing: false,
+      hasPendingChanges: false,
+      quitPending: false,
+      forceQuit: false,
+      syncError: null,
+      setIsSyncing: (isSyncing) => set({ isSyncing }),
+      setHasPendingChanges: (hasPendingChanges) => set({ hasPendingChanges }),
+      setQuitPending: (quitPending) => set({ quitPending }),
+      setForceQuit: (forceQuit) => set({ forceQuit }),
+      setSyncError: (syncError) => set({ syncError }),
+      applyMergedNotes: (notes) => set({ notes }),
     }),
     {
       name: "hades-store",
-      version: 2,
-      // Migrate older persisted state to fit the new vendor-aware shape.
+      version: 3,
       migrate: (persisted: any, version) => {
         if (!persisted) return persisted;
         if (version < 2) {
@@ -916,9 +960,13 @@ export const useStore = create<AppState>()(
           }
           if (!persisted.aiVendor) persisted.aiVendor = "groq";
         }
+        if (version < 3) {
+          if (!("syncFolder"  in persisted)) persisted.syncFolder  = null;
+          if (!("syncEnabled" in persisted)) persisted.syncEnabled = false;
+          if (!("lastSyncAt"  in persisted)) persisted.lastSyncAt  = null;
+        }
         return persisted;
       },
-      // Don't persist the running interval or loading state
       partialize: (s) => ({
         ...s,
         isRunning: false,
@@ -926,6 +974,12 @@ export const useStore = create<AppState>()(
         isChatLoading: false,
         notePdfUrl: null,
         notePdfFileName: "",
+        // Ephemeral sync runtime — always reset on start
+        isSyncing: false,
+        hasPendingChanges: false,
+        quitPending: false,
+        forceQuit: false,
+        syncError: null,
       }),
     }
   )

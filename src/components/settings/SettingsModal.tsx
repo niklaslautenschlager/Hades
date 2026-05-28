@@ -1,10 +1,12 @@
 import { useState } from "react";
-import { X, Key, Timer, Eye, EyeOff, Cpu, Volume2, Play, Palette, CalendarClock, Sliders } from "lucide-react";
+import { X, Key, Timer, Eye, EyeOff, Cpu, Volume2, Play, Palette, CalendarClock, Sliders, Cloud, FolderOpen, CloudOff, RefreshCw } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useShallow } from "zustand/react/shallow";
+import { open } from "@tauri-apps/plugin-dialog";
 import { useStore, type SoundType, type Theme, type AIVendor } from "../../store/useStore";
 import { AI_MODELS, VENDOR_LABELS, VENDOR_KEY_URLS } from "../../lib/ai";
 import { previewSound } from "../../lib/sound";
+import { syncDirtyNotes } from "../../lib/noteSync";
 
 interface Props {
   onClose: () => void;
@@ -53,6 +55,17 @@ export default function SettingsModal({ onClose }: Props) {
     setWeekStartsOn,
     weeklyGoalHours,
     setWeeklyGoalHours,
+    syncFolder,
+    syncEnabled,
+    lastSyncAt,
+    isSyncing,
+    setSyncFolder,
+    setSyncEnabled,
+    setLastSyncAt,
+    setIsSyncing,
+    setHasPendingChanges,
+    setSyncError,
+    notes,
   } = useStore(
     useShallow((s) => ({
       workDuration: s.workDuration,
@@ -78,6 +91,17 @@ export default function SettingsModal({ onClose }: Props) {
       setWeekStartsOn: s.setWeekStartsOn,
       weeklyGoalHours: s.weeklyGoalHours,
       setWeeklyGoalHours: s.setWeeklyGoalHours,
+      syncFolder:           s.syncFolder,
+      syncEnabled:          s.syncEnabled,
+      lastSyncAt:           s.lastSyncAt,
+      isSyncing:            s.isSyncing,
+      setSyncFolder:        s.setSyncFolder,
+      setSyncEnabled:       s.setSyncEnabled,
+      setLastSyncAt:        s.setLastSyncAt,
+      setIsSyncing:         s.setIsSyncing,
+      setHasPendingChanges: s.setHasPendingChanges,
+      setSyncError:         s.setSyncError,
+      notes:                s.notes,
     }))
   );
 
@@ -420,6 +444,90 @@ export default function SettingsModal({ onClose }: Props) {
                     {Math.round(localVolume * 100)}%
                   </span>
                 </div>
+              </div>
+            </section>
+
+            {/* Cloud Sync */}
+            <section>
+              <div className="flex items-center gap-2 mb-3">
+                <Cloud className="w-3.5 h-3.5 text-muted" />
+                <span className="text-xs font-medium text-foreground-secondary uppercase tracking-wider">
+                  Cloud Sync
+                </span>
+              </div>
+              <div className="space-y-3">
+                <Toggle
+                  label="Enable cloud sync"
+                  description="Auto-saves notes every 5 min to a folder you control (Syncthing, Google Drive, etc.)."
+                  value={syncEnabled}
+                  onChange={setSyncEnabled}
+                />
+
+                {syncEnabled && (
+                  <>
+                    <div>
+                      <label className="block text-xs text-muted mb-1.5">Sync folder</label>
+                      <button
+                        onClick={async () => {
+                          const selected = await open({ directory: true, multiple: false });
+                          if (selected && typeof selected === "string") setSyncFolder(selected);
+                        }}
+                        className="flex items-center gap-2 w-full px-3 py-2 rounded-lg border border-border
+                                   text-sm text-left text-foreground-secondary hover:text-foreground
+                                   hover:border-border-active transition-all"
+                      >
+                        <FolderOpen className="w-3.5 h-3.5 flex-shrink-0 text-muted" />
+                        <span className="flex-1 truncate font-mono text-xs">
+                          {syncFolder ?? "No folder selected"}
+                        </span>
+                      </button>
+                      <p className="text-xs text-muted mt-1">
+                        Point this at a folder synced by Google Drive, Syncthing, Nextcloud, or iCloud Drive.
+                      </p>
+                    </div>
+
+                    {syncFolder && (
+                      <div className="flex items-center justify-between px-3 py-2 rounded-lg border border-border">
+                        <div className="flex items-center gap-2">
+                          {isSyncing ? (
+                            <RefreshCw className="w-3 h-3 text-muted animate-spin" />
+                          ) : lastSyncAt ? (
+                            <Cloud className="w-3 h-3 text-muted" />
+                          ) : (
+                            <CloudOff className="w-3 h-3 text-muted" />
+                          )}
+                          <span className="text-xs text-muted">
+                            {isSyncing
+                              ? "Syncing…"
+                              : lastSyncAt
+                              ? `Last synced ${new Date(lastSyncAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
+                              : "Not yet synced"}
+                          </span>
+                        </div>
+                        <button
+                          onClick={async () => {
+                            if (isSyncing) return;
+                            setIsSyncing(true);
+                            setSyncError(null);
+                            try {
+                              await syncDirtyNotes(notes, syncFolder, null);
+                              setLastSyncAt(new Date().toISOString());
+                              setHasPendingChanges(false);
+                            } catch (e) {
+                              setSyncError(e instanceof Error ? e.message : String(e));
+                            } finally {
+                              setIsSyncing(false);
+                            }
+                          }}
+                          disabled={isSyncing}
+                          className="text-xs text-muted hover:text-foreground transition-colors disabled:opacity-40"
+                        >
+                          Sync now
+                        </button>
+                      </div>
+                    )}
+                  </>
+                )}
               </div>
             </section>
           </div>
