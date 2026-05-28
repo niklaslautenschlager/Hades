@@ -412,9 +412,7 @@ export default function NotepadModule() {
       {/* Floating Calculator */}
       <AnimatePresence>
         {showCalculator && (
-          <div className="fixed bottom-6 right-6 z-40">
-            <Calculator onClose={() => setShowCalculator(false)} />
-          </div>
+          <Calculator onClose={() => setShowCalculator(false)} />
         )}
       </AnimatePresence>
 

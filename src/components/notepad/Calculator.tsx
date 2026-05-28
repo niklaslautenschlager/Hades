@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
-import { X, Calculator as CalcIcon, History as HistoryIcon, Trash2 } from "lucide-react";
-import { motion } from "framer-motion";
+import { X, Calculator as CalcIcon, History as HistoryIcon, Trash2, GripHorizontal } from "lucide-react";
+import { motion, useDragControls } from "framer-motion";
 
 interface Props {
   onClose: () => void;
@@ -261,6 +261,7 @@ export default function Calculator({ onClose }: Props) {
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [showHistory, setShowHistory] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const dragControls = useDragControls();
 
   useEffect(() => {
     // Live preview
@@ -323,15 +324,26 @@ export default function Calculator({ onClose }: Props) {
 
   return (
     <motion.div
+      drag
+      dragControls={dragControls}
+      dragListener={false}
+      dragMomentum={false}
+      dragElastic={0}
       initial={{ opacity: 0, y: 12, scale: 0.97 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
       exit={{ opacity: 0, y: 12, scale: 0.97 }}
       transition={{ type: "spring", stiffness: 360, damping: 28 }}
-      className="surface w-[320px] flex flex-col shadow-2xl overflow-hidden"
+      className="fixed bottom-6 right-6 z-40 surface w-[320px] flex flex-col shadow-2xl overflow-hidden"
+      style={{ touchAction: "none" }}
     >
-      {/* Header */}
-      <div className="flex items-center justify-between px-3 py-2 border-b border-border bg-surface-elevated">
+      {/* Header — drag handle */}
+      <div
+        onPointerDown={(e) => dragControls.start(e)}
+        className="flex items-center justify-between px-3 py-2 border-b border-border
+                   bg-surface-elevated cursor-grab active:cursor-grabbing select-none"
+      >
         <div className="flex items-center gap-2">
+          <GripHorizontal className="w-3.5 h-3.5 text-muted/50" />
           <CalcIcon className="w-3.5 h-3.5 text-muted" />
           <span className="text-xs font-medium text-foreground-secondary">Calculator</span>
         </div>
