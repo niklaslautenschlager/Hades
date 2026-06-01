@@ -17,6 +17,7 @@ Hades does not talk to any cloud API directly. Instead it writes your notes as `
 5. Click **Sync now** for the first full upload
 
 Hades will auto-save every **5 minutes** when changes exist. If you close the app with unsaved changes a small "Saving…" bar appears at the bottom — you can cancel it and quit immediately if needed.
+Dropbox is strongly recommended, since it works on almost all Platforms.
 
 ---
 
