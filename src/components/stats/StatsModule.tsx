@@ -3,6 +3,7 @@ import { Clock, Target, Flame, TrendingUp, Award } from "lucide-react";
 import { motion } from "framer-motion";
 import { useShallow } from "zustand/react/shallow";
 import { useStore } from "../../store/useStore";
+import type { FocusSession } from "../../store/useStore";
 
 function formatDuration(seconds: number): string {
   const h = Math.floor(seconds / 3600);
@@ -87,8 +88,8 @@ export default function StatsModule() {
     const monthSessions = focusSessions.filter((f) => f.date >= monthStart);
     const yearSessions = focusSessions.filter((f) => f.date >= yearStart);
 
-    const sum = (arr: typeof focusSessions) => arr.reduce((a, b) => a + b.duration, 0);
-    const sessSum = (arr: typeof focusSessions) => arr.reduce((a, b) => a + b.sessions, 0);
+    const sum = (arr: FocusSession[]) => arr.reduce((a, b) => a + b.duration, 0);
+    const sessSum = (arr: FocusSession[]) => arr.reduce((a, b) => a + b.sessions, 0);
 
     return {
       today: { duration: todaySession?.duration ?? 0, sessions: todaySession?.sessions ?? 0 },
@@ -99,9 +100,6 @@ export default function StatsModule() {
       streak: calculateStreak(focusSessions),
     };
   }, [focusSessions, today, weekStart, monthStart, yearStart]);
-
-  const weeklyProgress = weeklyGoalHours > 0 ? stats.week.duration / (weeklyGoalHours * 3600) : 0;
-  const motivation = getMotivationalQuote(weeklyProgress);
 
   // Last 7 days chart data
   const last7Days = useMemo(() => {
@@ -167,61 +165,14 @@ export default function StatsModule() {
       <div className="flex-1 overflow-y-auto px-6 py-6">
         <div className="max-w-3xl mx-auto space-y-6">
 
-          {/* Weekly Goal */}
-          <div className="surface p-6">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-2">
-                <Target className="w-4 h-4 text-foreground-secondary" />
-                <h2 className="text-sm font-semibold text-foreground">Weekly Goal</h2>
-              </div>
-              <div className="flex items-center gap-2">
-                <input
-                  type="number"
-                  min={1}
-                  max={80}
-                  value={weeklyGoalHours}
-                  onChange={(e) => setWeeklyGoalHours(Math.max(1, Math.min(80, parseInt(e.target.value) || 20)))}
-                  className="input-base w-16 text-center text-sm font-mono"
-                />
-                <span className="text-xs text-muted">hours/week</span>
-              </div>
-            </div>
-
-            {/* Progress bar */}
-            <div className="relative h-4 bg-surface-hover rounded-full overflow-hidden mb-3">
-              <motion.div
-                initial={{ width: 0 }}
-                animate={{ width: `${Math.min(weeklyProgress * 100, 100)}%` }}
-                transition={{ duration: 0.8, ease: "easeOut" }}
-                className={`absolute inset-y-0 left-0 rounded-full ${
-                  weeklyProgress >= 1 ? "bg-green-500" : weeklyProgress >= 0.75 ? "bg-amber-500" : "bg-foreground"
-                }`}
-              />
-              {weeklyProgress > 1 && (
-                <motion.div
-                  initial={{ width: 0 }}
-                  animate={{ width: `${Math.min((weeklyProgress - 1) * 100, 100)}%` }}
-                  transition={{ duration: 0.8, ease: "easeOut", delay: 0.3 }}
-                  className="absolute inset-y-0 right-0 rounded-full bg-blue-500/40"
-                  style={{ left: "100%", marginLeft: "-100%" }}
-                />
-              )}
-            </div>
-
-            <div className="flex items-center justify-between mb-4">
-              <span className="text-sm text-foreground">
-                {formatHours(stats.week.duration)}h / {weeklyGoalHours}h
-              </span>
-              <span className="text-sm font-medium text-foreground-secondary">
-                {Math.round(weeklyProgress * 100)}%
-              </span>
-            </div>
-
-            {/* Motivational quote */}
-            <div className="p-3 bg-surface-hover rounded-lg">
-              <p className="text-sm text-foreground-secondary leading-relaxed">{motivation}</p>
-            </div>
-          </div>
+          {/* Weekly Goal — rendered by its own sub-component so the bar
+              updates every second during an active session without re-rendering
+              the heatmap and stat cards on every tick */}
+          <WeeklyGoalProgress
+            weekSecs={stats.week.duration}
+            weeklyGoalHours={weeklyGoalHours}
+            setWeeklyGoalHours={setWeeklyGoalHours}
+          />
 
           {/* Stat cards */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -326,6 +277,107 @@ export default function StatsModule() {
             </div>
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Weekly Goal Bar ──────────────────────────────────────────────────────────
+// Isolated component so the 1-second timer tick only re-renders the bar, not
+// the heatmap and stat cards in the parent.
+function WeeklyGoalProgress({
+  weekSecs,
+  weeklyGoalHours,
+  setWeeklyGoalHours,
+}: {
+  weekSecs: number;
+  weeklyGoalHours: number;
+  setWeeklyGoalHours: (h: number) => void;
+}) {
+  const { timeLeft, isRunning, pomodoroMode, workDuration } = useStore(
+    useShallow((s) => ({
+      timeLeft:     s.timeLeft,
+      isRunning:    s.isRunning,
+      pomodoroMode: s.pomodoroMode,
+      workDuration: s.workDuration,
+    }))
+  );
+
+  // Elapsed seconds in the current in-progress work session.
+  // recordFocusTime only fires when the session completes; this makes the bar
+  // fill live as you study instead of jumping only at session end.
+  const liveSeconds = pomodoroMode === "work" && isRunning
+    ? Math.max(0, workDuration * 60 - timeLeft)
+    : 0;
+
+  const totalSecs = weekSecs + liveSeconds;
+  const weeklyProgress = weeklyGoalHours > 0 ? totalSecs / (weeklyGoalHours * 3600) : 0;
+  const motivation = getMotivationalQuote(weeklyProgress);
+
+  const barColor =
+    weeklyProgress >= 1 ? "bg-green-500"
+    : weeklyProgress >= 0.75 ? "bg-amber-500"
+    : "bg-foreground";
+
+  return (
+    <div className="surface p-6">
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-2">
+          <Target className="w-4 h-4 text-foreground-secondary" />
+          <h2 className="text-sm font-semibold text-foreground">Weekly Goal</h2>
+        </div>
+        <div className="flex items-center gap-2">
+          <input
+            type="number"
+            min={1}
+            max={80}
+            value={weeklyGoalHours}
+            onChange={(e) =>
+              setWeeklyGoalHours(Math.max(1, Math.min(80, parseInt(e.target.value) || 20)))
+            }
+            className="input-base w-16 text-center text-sm font-mono"
+          />
+          <span className="text-xs text-muted">hours/week</span>
+        </div>
+      </div>
+
+      {/* Progress bar */}
+      <div className="relative h-4 bg-surface-hover rounded-full overflow-hidden mb-3">
+        {/* Fill — rounded-l-full so left edge curves with the container; the
+            container's overflow-hidden clips the right edge cleanly at any % */}
+        <motion.div
+          initial={{ width: 0 }}
+          animate={{ width: `${Math.min(weeklyProgress * 100, 100)}%` }}
+          transition={{
+            duration: isRunning ? 0.95 : 0.8,
+            ease:     isRunning ? "linear" : "easeOut",
+          }}
+          className={`absolute inset-y-0 left-0 rounded-l-full transition-colors duration-300 ${barColor}`}
+        />
+        {/* Quarter-point reference marks — help gauge progress at a glance */}
+        {[25, 50, 75].map((pct) => (
+          <div
+            key={pct}
+            className="absolute inset-y-0 w-px bg-background/25 pointer-events-none"
+            style={{ left: `${pct}%` }}
+          />
+        ))}
+        {/* Subtle top-edge highlight for a slight sense of depth */}
+        <div className="absolute inset-0 bg-gradient-to-b from-white/8 to-transparent pointer-events-none" />
+      </div>
+
+      <div className="flex items-center justify-between mb-4">
+        <span className="text-sm text-foreground">
+          {formatHours(totalSecs)}h{" "}
+          <span className="text-muted">/ {weeklyGoalHours}h</span>
+        </span>
+        <span className="text-sm font-medium text-foreground-secondary">
+          {Math.round(weeklyProgress * 100)}%
+        </span>
+      </div>
+
+      <div className="p-3 bg-surface-hover rounded-lg">
+        <p className="text-sm text-foreground-secondary leading-relaxed">{motivation}</p>
       </div>
     </div>
   );

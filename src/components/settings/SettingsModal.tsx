@@ -7,7 +7,7 @@ import { useStore, type SoundType, type Theme, type AIVendor } from "../../store
 import { AI_MODELS, VENDOR_LABELS, VENDOR_KEY_URLS } from "../../lib/ai";
 import { previewSound } from "../../lib/sound";
 import { syncDirtyNotes } from "../../lib/noteSync";
-import { installUpdate, restartApp } from "../../lib/updater";
+import { installUpdate, restartApp, hostPlatform } from "../../lib/updater";
 
 interface Props {
   onClose: () => void;
@@ -126,6 +126,8 @@ export default function SettingsModal({ onClose }: Props) {
     }))
   );
 
+  const platform = hostPlatform();
+
   const [localVendor, setLocalVendor] = useState<AIVendor>(aiVendor);
   const localConfig = aiVendorConfigs[localVendor];
   const [keyDraft, setKeyDraft] = useState(localConfig.apiKey);
@@ -227,15 +229,25 @@ export default function SettingsModal({ onClose }: Props) {
                 )}
 
                 {updateInstalled ? (
-                  <button
-                    onClick={() => restartApp().catch(() => {})}
-                    className="flex items-center gap-2 w-full justify-center px-3 py-2
-                               rounded-lg bg-foreground text-surface text-xs font-medium
-                               hover:opacity-90 transition-opacity"
-                  >
-                    <RotateCw className="w-3.5 h-3.5" />
-                    Restart to apply
-                  </button>
+                  platform === "linux" ? (
+                    <button
+                      onClick={() => restartApp().catch(() => {})}
+                      className="flex items-center gap-2 w-full justify-center px-3 py-2
+                                 rounded-lg bg-foreground text-surface text-xs font-medium
+                                 hover:opacity-90 transition-opacity"
+                    >
+                      <RotateCw className="w-3.5 h-3.5" />
+                      Restart to apply
+                    </button>
+                  ) : platform === "macos" ? (
+                    <p className="text-xs text-foreground-secondary text-center py-1 leading-relaxed">
+                      Installer opened — drag Hades to Applications, then relaunch.
+                    </p>
+                  ) : (
+                    <p className="text-xs text-foreground-secondary text-center py-1 leading-relaxed">
+                      Installer launched — follow the on-screen prompts to complete the update.
+                    </p>
+                  )
                 ) : (
                   <button
                     disabled={isUpdating || !updateAssetUrl}

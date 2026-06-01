@@ -29,6 +29,13 @@ function isNewer(latest: string, current: string): boolean {
   return false;
 }
 
+export function hostPlatform(): "linux" | "macos" | "windows" {
+  const ua = navigator.userAgent;
+  if (/Windows/i.test(ua)) return "windows";
+  if (/Mac|Macintosh/i.test(ua)) return "macos";
+  return "linux";
+}
+
 export async function checkForUpdate(): Promise<UpdateInfo | null> {
   const current = await getVersion();
 
@@ -45,16 +52,23 @@ export async function checkForUpdate(): Promise<UpdateInfo | null> {
 
   if (!isNewer(data.tag_name, current)) return null;
 
-  // Prefer a plain Linux binary; fall back to the first asset
-  const asset =
-    data.assets.find(
-      a =>
-        a.name.toLowerCase().includes("linux") &&
-        !a.name.endsWith(".deb") &&
-        !a.name.endsWith(".rpm") &&
-        !a.name.endsWith(".AppImage") &&
-        !a.name.endsWith(".tar.gz")
-    ) ?? data.assets[0];
+  const platform = hostPlatform();
+  let asset: { name: string; browser_download_url: string } | undefined;
+
+  switch (platform) {
+    case "linux":
+      asset = data.assets.find(a => a.name.endsWith(".AppImage"));
+      break;
+    case "macos":
+      asset = data.assets.find(a => a.name.endsWith(".dmg"));
+      break;
+    case "windows":
+      asset =
+        data.assets.find(a => /[_-]setup\.exe$/i.test(a.name)) ??
+        data.assets.find(a => a.name.endsWith(".msi")) ??
+        data.assets.find(a => /\.exe$/i.test(a.name));
+      break;
+  }
 
   if (!asset) return null;
 

@@ -247,33 +247,69 @@ async fn install_update(download_url: String) -> Result<(), String> {
         .await
         .map_err(|e| format!("Failed to read download: {}", e))?;
 
-    let current_exe = std::env::current_exe()
-        .map_err(|e| format!("Cannot locate current executable: {}", e))?;
-
-    // Write to a sibling temp file so rename() is atomic (same filesystem)
-    let tmp = current_exe.with_extension("new");
-
+    #[cfg(target_os = "linux")]
     {
-        let mut f = std::fs::File::create(&tmp)
-            .map_err(|e| format!("Cannot create temp file: {}", e))?;
-        f.write_all(&bytes)
-            .map_err(|e| format!("Cannot write temp file: {}", e))?;
+        // When running as an AppImage, current_exe() resolves into the read-only
+        // squashfs mount (/tmp/.mount_*/…). The APPIMAGE env var is the real path.
+        let target = if let Ok(path) = std::env::var("APPIMAGE") {
+            std::path::PathBuf::from(path)
+        } else {
+            std::env::current_exe()
+                .map_err(|e| format!("Cannot locate current executable: {}", e))?
+        };
+
+        let tmp = target.with_extension("new");
+
+        {
+            let mut f = std::fs::File::create(&tmp)
+                .map_err(|e| format!("Cannot create temp file: {}", e))?;
+            f.write_all(&bytes)
+                .map_err(|e| format!("Cannot write temp file: {}", e))?;
+        }
+
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = std::fs::metadata(&tmp)
+                .map_err(|e| e.to_string())?
+                .permissions();
+            perms.set_mode(0o755);
+            std::fs::set_permissions(&tmp, perms)
+                .map_err(|e| format!("Cannot set executable bit: {}", e))?;
+        }
+
+        // Atomic replace — running process keeps its inode, dir entry is updated
+        std::fs::rename(&tmp, &target)
+            .map_err(|e| format!("Cannot replace binary: {}", e))?;
     }
 
-    #[cfg(unix)]
+    #[cfg(target_os = "macos")]
     {
-        use std::os::unix::fs::PermissionsExt;
-        let mut perms = std::fs::metadata(&tmp)
-            .map_err(|e| e.to_string())?
-            .permissions();
-        perms.set_mode(0o755);
-        std::fs::set_permissions(&tmp, perms)
-            .map_err(|e| format!("Cannot set executable bit: {}", e))?;
+        let tmp = std::env::temp_dir().join("hades-update.dmg");
+        {
+            let mut f = std::fs::File::create(&tmp)
+                .map_err(|e| format!("Cannot create temp file: {}", e))?;
+            f.write_all(&bytes)
+                .map_err(|e| format!("Cannot write installer: {}", e))?;
+        }
+        std::process::Command::new("open")
+            .arg(&tmp)
+            .spawn()
+            .map_err(|e| format!("Cannot open installer: {}", e))?;
     }
 
-    // Atomic replace — the running process keeps its inode; the dir entry is updated
-    std::fs::rename(&tmp, &current_exe)
-        .map_err(|e| format!("Cannot replace binary: {}", e))?;
+    #[cfg(target_os = "windows")]
+    {
+        let tmp = std::env::temp_dir().join("hades-update-setup.exe");
+        {
+            let mut f = std::fs::File::create(&tmp)
+                .map_err(|e| format!("Cannot create temp file: {}", e))?;
+            f.write_all(&bytes)
+                .map_err(|e| format!("Cannot write installer: {}", e))?;
+        }
+        std::process::Command::new(&tmp)
+            .spawn()
+            .map_err(|e| format!("Cannot launch installer: {}", e))?;
+    }
 
     Ok(())
 }

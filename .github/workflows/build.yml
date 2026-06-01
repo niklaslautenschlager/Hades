@@ -1,0 +1,111 @@
+name: Build & Release
+
+on:
+  push:
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── Fast checks on every PR ─────────────────────────────────────────────────
+  check:
+    name: Check (${{ matrix.os }})
+    if: github.event_name == 'pull_request'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Linux system dependencies
+        if: matrix.os == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libgtk-3-dev libwebkit2gtk-4.1-dev libappindicator3-dev \
+            librsvg2-dev patchelf libsoup-3.0-dev
+
+      - run: npm ci
+
+      # TypeScript + Vite compile check (no Rust involved)
+      - run: npm run build
+
+      # Rust compile check — catches cfg-gated errors per platform
+      - name: cargo check
+        working-directory: src-tauri
+        run: cargo check
+
+  # ── Full release builds on version tags ─────────────────────────────────────
+  release:
+    name: Release (${{ matrix.name }})
+    if: startsWith(github.ref, 'refs/tags/v')
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux
+            os: ubuntu-22.04
+            tauri-args: ''
+          - name: macOS (universal)
+            os: macos-latest
+            tauri-args: '--target universal-apple-darwin'
+          - name: Windows
+            os: windows-latest
+            tauri-args: ''
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      # macOS universal binary requires both architectures
+      - name: Add aarch64 Rust target (macOS)
+        if: matrix.os == 'macos-latest'
+        run: rustup target add aarch64-apple-darwin
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Linux system dependencies
+        if: matrix.os == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libgtk-3-dev libwebkit2gtk-4.1-dev libappindicator3-dev \
+            librsvg2-dev patchelf libsoup-3.0-dev
+
+      - run: npm ci
+
+      - name: Build & publish release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: Hades ${{ github.ref_name }}
+          releaseDraft: true
+          prerelease: false
+          args: ${{ matrix.tauri-args }}
