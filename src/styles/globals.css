@@ -241,10 +241,8 @@
   }
 }
 
-/* CodeMirror — layout handled by the JS theme; only colours/aesthetics here */
-.cm-editor.cm-focused {
-  outline: none !important;
-}
+/* ─── CodeMirror base ────────────────────────────────────────────── */
+.cm-editor.cm-focused { outline: none !important; }
 
 .cm-content {
   color: var(--color-foreground);
@@ -253,35 +251,36 @@
 
 .cm-gutters {
   background: transparent !important;
-  border-right: 1px solid var(--color-border) !important;
+  border: none !important;
   color: var(--color-muted);
-  min-width: 48px;
 }
 
+.cm-activeLine { background: var(--selection) !important; }
+.cm-activeLineGutter { background: transparent !important; color: var(--color-foreground-secondary); }
+.cm-cursor { border-left-color: var(--color-foreground) !important; }
+.cm-selectionBackground { background: var(--selection) !important; }
+.cm-focused .cm-selectionBackground { background: var(--selection) !important; }
+
+/* Line-number gutter */
 .cm-lineNumbers .cm-gutterElement {
-  padding: 0 12px 0 8px;
+  padding: 0 6px 0 10px;
   font-size: 12px;
+  color: var(--color-muted);
+  font-family: "JetBrains Mono", monospace;
 }
 
-.cm-activeLine {
-  background: var(--selection) !important;
-}
-
-.cm-activeLineGutter {
-  background: transparent !important;
-  color: var(--color-foreground-secondary);
-}
-
-.cm-cursor {
-  border-left-color: var(--color-foreground) !important;
-}
-
-.cm-selectionBackground {
-  background: var(--selection) !important;
-}
-
-.cm-focused .cm-selectionBackground {
-  background: var(--selection) !important;
+/* Fold gutter */
+.cm-foldGutter { opacity: 0; transition: opacity 0.2s; }
+.cm-editor:hover .cm-foldGutter,
+.cm-editor.cm-focused .cm-foldGutter { opacity: 1; }
+.cm-foldPlaceholder {
+  background: var(--color-surface-hover);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  padding: 0 6px;
+  color: var(--color-muted);
+  font-size: 0.8em;
+  cursor: pointer;
 }
 
 /* Vim mode status bar */
@@ -294,7 +293,65 @@
   font-size: 12px;
 }
 
-/* Rendered markdown preview */
+/* ─── WYSIWYG markdown line decorations ──────────────────────────── */
+
+/* Headings — sized per level (reliable line-level sizing) */
+.cm-line.cm-md-h1 {
+  font-size: 1.85em;
+  font-weight: 700;
+  line-height: 1.3;
+  color: var(--color-foreground);
+  padding-bottom: 0.2em !important;
+  border-bottom: 1px solid var(--color-border) !important;
+}
+.cm-line.cm-md-h2 {
+  font-size: 1.45em;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--color-foreground);
+  padding-bottom: 0.15em !important;
+  border-bottom: 1px solid var(--color-border) !important;
+}
+.cm-line.cm-md-h3 { font-size: 1.22em; font-weight: 600; color: var(--color-foreground); }
+.cm-line.cm-md-h4 { font-size: 1.08em; font-weight: 600; color: var(--color-foreground); }
+.cm-line.cm-md-h5 { font-size: 1em;    font-weight: 600; color: var(--color-foreground); }
+.cm-line.cm-md-h6 { font-size: 1em;    font-weight: 600; color: var(--color-foreground-secondary); }
+
+/* Rigid bullet glyph */
+.cm-md-bullet {
+  display: inline-block;
+  color: var(--color-foreground-secondary);
+  font-weight: 700;
+  width: 1ch;
+}
+
+/* Blockquote lines */
+.cm-line.cm-md-blockquote-line {
+  border-left: 3px solid var(--color-border-active) !important;
+  padding-left: 1em !important;
+  background: var(--color-surface-hover) !important;
+  border-radius: 0 4px 4px 0;
+}
+
+/* Fenced code block lines */
+.cm-line.cm-md-fence-line {
+  background: var(--color-surface-elevated) !important;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace !important;
+  font-size: 0.875em !important;
+  border-left: 2px solid var(--color-border) !important;
+}
+
+/* Horizontal rule line */
+.cm-line.cm-md-hr-line {
+  color: transparent !important;
+  border-top: 1px solid var(--color-border) !important;
+  margin: 0.5em 0 !important;
+  font-size: 0 !important;
+  height: 1px !important;
+  overflow: hidden;
+}
+
+/* ─── Rendered markdown preview ───────────────────────────────────── */
 .markdown-body {
   color: var(--color-foreground-secondary);
   font-size: 14px;
@@ -388,8 +445,13 @@
   margin: 0.2em 0;
 }
 
+.markdown-body li {
+  padding-left: 0.2em;
+}
 .markdown-body li::marker {
-  color: var(--color-muted);
+  color: var(--color-foreground-secondary);
+  font-size: 1em;
+  font-weight: 600;
 }
 
 .markdown-body blockquote {

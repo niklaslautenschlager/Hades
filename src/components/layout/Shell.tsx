@@ -61,8 +61,12 @@ export default function Shell({ children }: ShellProps) {
         {/* Logo */}
         <div className="flex items-center justify-center h-16 border-b border-border">
           <div className="relative flex items-center justify-center w-8 h-8">
-            <div className="absolute inset-0 rounded-lg bg-surface-hover" />
-            <Flame className="relative w-4 h-4 text-foreground" strokeWidth={2} />
+            <img
+              src="/app-icon.png"
+              alt="Hades"
+              className="w-6 h-6 object-contain rounded-sm"
+              draggable={false}
+            />
           </div>
         </div>
 
