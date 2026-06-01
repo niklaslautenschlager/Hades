@@ -1,6 +1,6 @@
-# Hades `v0.1.0-alpha`
+# Hades `v0.5.1`
 
-> **Pre-alpha software.** Bugs, crashes, and missing features are expected. Use at your own risk and back up any important data.
+> **Early software.** Bugs and missing features are expected. Use at your own risk and back up any important data.
 
 A focused, distraction-free desktop productivity suite built for students and knowledge workers. Hades combines a Pomodoro timer with an AI study assistant, a markdown note editor, calendar, task manager, flashcards with spaced repetition, and detailed focus statistics — all in one unified interface.
 
@@ -12,7 +12,7 @@ Built with [Tauri 2](https://v2.tauri.app) for native performance on macOS, Linu
 - Configurable work, break, and long break durations
 - Session tracking with visual progress ring
 - Session goal setting
-- Integrated AI study assistant powered by Groq (Llama, Mixtral)
+- Integrated AI study assistant — multi-vendor (Groq, OpenAI, Anthropic, or a local Ollama model)
 - Built-in commands: `/explain`, `/quiz`, `/motivate`, `/summarize`, and more
 - Sound notifications with multiple sound options (bell, chime, gong, digital)
 
@@ -54,9 +54,13 @@ Built with [Tauri 2](https://v2.tauri.app) for native performance on macOS, Linu
 - All-time totals
 
 ### General
-- Five themes: Zinc Dark, Paper (light), Catppuccin Mocha, Gruvbox, Nord
+- **18 themes** across four packs, with a collapsible theme picker and a bold per-theme accent system (gradients + glow):
+  - *Core* — Zinc Dark, Paper, Catppuccin Mocha, Gruvbox, Nord
+  - *Popular* — Tokyo Night, Dracula, One Dark, Monokai Pro, Rosé Pine
+  - *Light & Classic* — Solarized Dark/Light, Everforest, Rosé Pine Dawn
+  - *Hades Originals* — Ember, Abyss, Synthwave, Matrix
+- In-app updater via GitHub Releases (Linux/macOS/Windows aware)
 - Persistent state via Zustand + Tauri Store
-- Native window controls and system tray
 - Resizable panels throughout
 
 ## Tech Stack
@@ -69,7 +73,7 @@ Built with [Tauri 2](https://v2.tauri.app) for native performance on macOS, Linu
 | Editor | CodeMirror 6 with vim bindings |
 | Styling | Tailwind CSS with CSS custom properties |
 | Animation | Framer Motion |
-| AI | Groq API (OpenAI-compatible, SSE streaming via Rust) |
+| AI | Groq / OpenAI / Anthropic / Ollama (SSE streaming via Rust) |
 | Calendar | ical.js for iCal parsing |
 | Icons | Lucide React |
 

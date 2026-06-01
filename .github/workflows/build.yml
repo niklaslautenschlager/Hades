@@ -56,6 +56,10 @@ jobs:
   release:
     name: Release (${{ matrix.name }})
     if: startsWith(github.ref, 'refs/tags/v')
+    # tauri-action creates/uploads the GitHub Release — needs write access to
+    # repo contents, otherwise it fails with "Resource not accessible by integration".
+    permissions:
+      contents: write
     strategy:
       fail-fast: false
       matrix:
@@ -80,10 +84,12 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
-      # macOS universal binary requires both architectures
-      - name: Add aarch64 Rust target (macOS)
+      # macOS universal binary needs BOTH arches. The macos-latest runner is
+      # arm64 (aarch64 is native), so x86_64-apple-darwin must be added too —
+      # without it the --target universal-apple-darwin build fails.
+      - name: Add macOS Rust targets
         if: matrix.os == 'macos-latest'
-        run: rustup target add aarch64-apple-darwin
+        run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
 
       - uses: swatinem/rust-cache@v2
         with:

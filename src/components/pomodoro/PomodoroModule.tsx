@@ -77,7 +77,7 @@ export default function PomodoroModule() {
   const mins = String(Math.floor(timeLeft / 60)).padStart(2, "0");
   const secs = String(timeLeft % 60).padStart(2, "0");
 
-  const RADIUS = 88;
+  const RADIUS = 104;
   const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
   const strokeDash = CIRCUMFERENCE * (1 - progress);
 
@@ -172,7 +172,7 @@ export default function PomodoroModule() {
 
           <div className="absolute flex flex-col items-center">
             <span
-              className="text-7xl font-light text-foreground tracking-[-0.03em]"
+              className="text-6xl font-light text-foreground tracking-[-0.02em] tabular-nums"
               style={{ fontFamily: "'Inter', system-ui, sans-serif", fontFeatureSettings: '"tnum"' }}
             >
               {mins}:{secs}
