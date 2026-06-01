@@ -23,7 +23,25 @@ export type Module = "calendar" | "pomodoro" | "notepad" | "tasks" | "flashcards
 
 export type PomodoroMode = "work" | "break" | "longBreak";
 
-export type Theme = "dark" | "light" | "catppuccin" | "gruvbox" | "nord";
+export type Theme =
+  | "dark"
+  | "light"
+  | "catppuccin"
+  | "gruvbox"
+  | "nord"
+  | "tokyonight"
+  | "dracula"
+  | "onedark"
+  | "monokai"
+  | "rosepine"
+  | "solarized"
+  | "solarized-light"
+  | "everforest"
+  | "rosepine-dawn"
+  | "ember"
+  | "abyss"
+  | "synthwave"
+  | "matrix";
 
 export type SoundType = "bell" | "chime" | "gong" | "digital" | "none";
 

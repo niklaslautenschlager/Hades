@@ -162,7 +162,7 @@ function RecurrenceEditor({
                 }}
                 className={`w-8 h-8 rounded-md text-xs font-medium transition-all
                            ${active
-                             ? "bg-foreground text-surface"
+                             ? "bg-accent-gradient text-[var(--accent-contrast)]"
                              : "bg-surface-hover text-muted hover:text-foreground-secondary"
                            }`}
               >

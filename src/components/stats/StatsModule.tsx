@@ -204,7 +204,7 @@ export default function StatsModule() {
                     animate={{ height: `${(day.duration / maxDuration) * 100}%` }}
                     transition={{ duration: 0.5, delay: i * 0.05 }}
                     className={`w-full rounded-t-md min-h-[2px] ${
-                      day.duration > 0 ? "bg-foreground" : "bg-surface-hover"
+                      day.duration > 0 ? "bg-accent-gradient" : "bg-surface-hover"
                     }`}
                     style={{ maxHeight: "100%" }}
                     title={formatDuration(day.duration)}
@@ -317,7 +317,7 @@ function WeeklyGoalProgress({
   const barColor =
     weeklyProgress >= 1 ? "bg-green-500"
     : weeklyProgress >= 0.75 ? "bg-amber-500"
-    : "bg-foreground";
+    : "bg-accent-gradient";
 
   return (
     <div className="surface p-6">

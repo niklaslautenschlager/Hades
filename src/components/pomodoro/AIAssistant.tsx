@@ -543,7 +543,7 @@ export default function AIAssistant({ goal }: Props) {
                        transition-all duration-150 flex-shrink-0
                        ${unrestricted
                          ? "bg-amber-400 text-zinc-950 hover:bg-amber-300"
-                         : "bg-foreground text-surface hover:opacity-90"
+                         : "bg-accent-gradient text-[var(--accent-contrast)] hover:brightness-105"
                        }`}
           >
             <Send className="w-3.5 h-3.5" />

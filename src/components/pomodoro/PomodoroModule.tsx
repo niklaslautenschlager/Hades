@@ -119,78 +119,89 @@ export default function PomodoroModule() {
             <button
               key={mode}
               onClick={() => setPomodoroMode(mode)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-150
+              className={`relative px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all duration-150
                           ${pomodoroMode === mode
-                            ? "bg-foreground text-surface"
+                            ? "text-[var(--accent-contrast)]"
                             : "text-muted hover:text-foreground-secondary"
                           }`}
             >
-              {MODE_LABELS[mode]}
+              {pomodoroMode === mode && (
+                <motion.span
+                  layoutId="mode-pill"
+                  className="absolute inset-0 rounded-lg bg-accent-gradient glow-accent-sm"
+                  transition={{ type: "spring", stiffness: 480, damping: 32 }}
+                />
+              )}
+              <span className="relative">{MODE_LABELS[mode]}</span>
             </button>
           ))}
         </div>
 
         {/* Timer ring */}
         <div className="relative flex items-center justify-center">
-          <svg width="224" height="224" className="-rotate-90">
+          <svg width="248" height="248" className="-rotate-90">
+            <defs>
+              <linearGradient id="ringGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" style={{ stopColor: "var(--accent)" }} />
+                <stop offset="100%" style={{ stopColor: "var(--accent-2)" }} />
+              </linearGradient>
+            </defs>
             <circle
-              cx="112"
-              cy="112"
+              cx="124"
+              cy="124"
               r={RADIUS}
               fill="none"
               stroke="var(--color-border)"
-              strokeWidth="6"
+              strokeWidth="7"
             />
             <motion.circle
-              cx="112"
-              cy="112"
+              cx="124"
+              cy="124"
               r={RADIUS}
               fill="none"
-              stroke="var(--color-foreground)"
-              strokeWidth="6"
+              stroke="url(#ringGrad)"
+              strokeWidth="7"
               strokeLinecap="round"
               strokeDasharray={CIRCUMFERENCE}
               strokeDashoffset={strokeDash}
               animate={{ strokeDashoffset: strokeDash }}
               transition={{ duration: 0.5, ease: "easeOut" }}
-              style={{ opacity: pomodoroMode === "work" ? 0.9 : pomodoroMode === "break" ? 0.6 : 0.4 }}
+              style={{ filter: "drop-shadow(0 0 7px var(--accent-glow))" }}
             />
           </svg>
 
           <div className="absolute flex flex-col items-center">
             <span
-              className="text-6xl font-light text-foreground tracking-[-0.02em]"
+              className="text-7xl font-light text-foreground tracking-[-0.03em]"
               style={{ fontFamily: "'Inter', system-ui, sans-serif", fontFeatureSettings: '"tnum"' }}
             >
               {mins}:{secs}
             </span>
-            <span className="text-xs font-medium text-muted mt-1 uppercase tracking-widest">
+            <span className="text-xs font-semibold text-accent mt-1.5 uppercase tracking-[0.2em]">
               {MODE_LABELS[pomodoroMode]}
             </span>
           </div>
         </div>
 
-        {/* Session dots */}
-        <div className="flex items-center gap-2">
+        {/* Session bars */}
+        <div className="flex items-center gap-1.5">
           {sessionDots.map((filled, i) => (
             <div
               key={i}
-              className={`w-1.5 h-1.5 rounded-full transition-all duration-300 ${
-                filled ? "bg-foreground" : "bg-surface-hover"
+              className={`h-1.5 rounded-full transition-all duration-300 ${
+                filled ? "w-6 bg-accent-gradient glow-accent-sm" : "w-3 bg-surface-hover"
               }`}
             />
           ))}
-          <span className="ml-2 text-xs text-muted">
-            {sessionsCompleted} completed
-          </span>
+          <span className="ml-2 text-xs text-muted">{sessionsCompleted} completed</span>
         </div>
 
         {/* Controls */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-4">
           <button
             onClick={resetTimer}
-            className="flex items-center justify-center w-10 h-10 rounded-xl
-                       text-muted hover:text-foreground-secondary hover:bg-surface-hover transition-all"
+            className="flex items-center justify-center w-11 h-11 rounded-xl border border-border
+                       text-muted hover:text-foreground hover:border-border-active hover:bg-surface-hover transition-all"
           >
             <RotateCcw className="w-4 h-4" />
           </button>
@@ -198,21 +209,21 @@ export default function PomodoroModule() {
           <motion.button
             whileTap={{ scale: 0.94 }}
             onClick={isRunning ? pauseTimer : startTimer}
-            className="flex items-center justify-center w-16 h-16 rounded-2xl
-                       bg-foreground hover:opacity-90 text-surface transition-all duration-150
-                       shadow-glow"
+            className="flex items-center justify-center w-[68px] h-[68px] rounded-2xl
+                       bg-accent-gradient text-[var(--accent-contrast)] glow-accent
+                       hover:brightness-105 transition-all duration-150"
           >
             {isRunning ? (
-              <Pause className="w-6 h-6" fill="currentColor" />
+              <Pause className="w-7 h-7" fill="currentColor" />
             ) : (
-              <Play className="w-6 h-6 ml-0.5" fill="currentColor" />
+              <Play className="w-7 h-7 ml-0.5" fill="currentColor" />
             )}
           </motion.button>
 
           <button
             onClick={skipSession}
-            className="flex items-center justify-center w-10 h-10 rounded-xl
-                       text-muted hover:text-foreground-secondary hover:bg-surface-hover transition-all"
+            className="flex items-center justify-center w-11 h-11 rounded-xl border border-border
+                       text-muted hover:text-foreground hover:border-border-active hover:bg-surface-hover transition-all"
             title="Skip to next session"
           >
             <SkipForward className="w-4 h-4" />

@@ -1,7 +1,7 @@
 {
   "name": "hades",
   "private": true,
-  "version": "0.4.0",
+  "version": "0.5.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -9,8 +9,8 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "dev:app": "GDK_BACKEND=x11 WEBKIT_DISABLE_COMPOSITING_MODE=1 WEBKIT_DISABLE_DMABUF_RENDERER=1 tauri dev",
-    "build:install": "tauri build --bundles none && cp src-tauri/target/release/hades ~/.local/bin/hades",
-    "build:appimage": "tauri build --bundles none && node scripts/build-appimage.mjs"
+    "build:install": "tauri build --no-bundle && cp src-tauri/target/release/hades ~/.local/bin/hades",
+    "build:appimage": "tauri build --no-bundle && node scripts/build-appimage.mjs"
   },
   "dependencies": {
     "@codemirror/commands": "^6.10.3",

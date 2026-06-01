@@ -215,7 +215,7 @@ export default function NotepadModule() {
                   className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-mono font-medium
                                transition-all duration-150
                                ${isVimMode
-                                 ? "bg-foreground text-surface"
+                                 ? "bg-accent-gradient text-[var(--accent-contrast)]"
                                  : "text-muted hover:text-foreground-secondary hover:bg-surface-hover"
                                }`}
                   title={isVimMode ? "Vim mode on" : "Vim mode off"}
@@ -229,7 +229,7 @@ export default function NotepadModule() {
                   className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium
                                transition-all duration-150
                                ${showNotepadPdf
-                                 ? "bg-foreground text-surface"
+                                 ? "bg-accent-gradient text-[var(--accent-contrast)]"
                                  : "text-muted hover:text-foreground-secondary hover:bg-surface-hover"
                                }`}
                   title="Toggle PDF viewer"
@@ -243,7 +243,7 @@ export default function NotepadModule() {
                   className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium
                                transition-all duration-150
                                ${showCalculator
-                                 ? "bg-foreground text-surface"
+                                 ? "bg-accent-gradient text-[var(--accent-contrast)]"
                                  : "text-muted hover:text-foreground-secondary hover:bg-surface-hover"
                                }`}
                   title="Calculator"

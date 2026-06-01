@@ -164,7 +164,7 @@ export default function CalendarModule() {
                   className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium
                                transition-all duration-150
                                ${calendarView === v
-                                 ? "bg-foreground text-surface"
+                                 ? "bg-accent-gradient text-[var(--accent-contrast)]"
                                  : "text-muted hover:text-foreground-secondary"
                                }`}
                 >
@@ -391,7 +391,7 @@ function MonthView({ currentDate, events, weekStartsOn, showWeekNumbers, onDayCl
                       self-start flex items-center justify-center w-6 h-6 rounded-full
                       text-xs font-medium mb-1 transition-colors
                       ${today
-                        ? "bg-foreground text-surface"
+                        ? "bg-accent-gradient text-[var(--accent-contrast)]"
                         : "text-foreground-secondary hover:text-foreground"
                       }
                     `}

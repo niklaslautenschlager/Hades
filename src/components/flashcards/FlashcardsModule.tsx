@@ -116,7 +116,7 @@ function ReviewSession({
           </span>
           <div className="w-32 h-1.5 bg-surface-hover rounded-full overflow-hidden">
             <div
-              className="h-full bg-foreground rounded-full transition-all duration-300"
+              className="h-full bg-accent-gradient rounded-full transition-all duration-300"
               style={{ width: `${((currentIndex + 1) / total) * 100}%` }}
             />
           </div>

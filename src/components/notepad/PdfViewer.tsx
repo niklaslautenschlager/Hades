@@ -192,7 +192,7 @@ export default function PdfViewer({ onClose }: Props) {
         >
           <div
             className={`w-16 h-16 rounded-2xl flex items-center justify-center transition-all
-                        ${isDragOver ? "bg-foreground text-surface scale-110" : "bg-surface-hover"}`}
+                        ${isDragOver ? "bg-accent-gradient text-[var(--accent-contrast)] scale-110" : "bg-surface-hover"}`}
           >
             <Upload className={`w-7 h-7 ${isDragOver ? "" : "text-muted"}`} />
           </div>

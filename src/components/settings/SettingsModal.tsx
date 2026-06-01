@@ -3,8 +3,9 @@ import { X, Key, Timer, Eye, EyeOff, Cpu, Volume2, Play, Palette, CalendarClock,
 import { motion, AnimatePresence } from "framer-motion";
 import { useShallow } from "zustand/react/shallow";
 import { open } from "@tauri-apps/plugin-dialog";
-import { useStore, type SoundType, type Theme, type AIVendor } from "../../store/useStore";
+import { useStore, type SoundType, type AIVendor } from "../../store/useStore";
 import { AI_MODELS, VENDOR_LABELS, VENDOR_KEY_URLS } from "../../lib/ai";
+import { THEMES, THEME_GROUPS } from "../../lib/themes";
 import { previewSound } from "../../lib/sound";
 import { syncDirtyNotes } from "../../lib/noteSync";
 import { installUpdate, restartApp, hostPlatform } from "../../lib/updater";
@@ -19,14 +20,6 @@ const SOUND_OPTIONS: { id: SoundType; label: string; description: string }[] = [
   { id: "gong", label: "Gong", description: "Deep resonant gong" },
   { id: "digital", label: "Digital", description: "Short electronic beeps" },
   { id: "none", label: "None", description: "No sound" },
-];
-
-const THEME_OPTIONS: { id: Theme; label: string; description: string; preview: string[] }[] = [
-  { id: "dark",       label: "Zinc Dark",  description: "Default dark",         preview: ["#09090b", "#27272a", "#f4f4f5"] },
-  { id: "light",      label: "Paper",      description: "Warm paper white",     preview: ["#faf8f1", "#e9e3d0", "#1c1917"] },
-  { id: "catppuccin", label: "Catppuccin", description: "Mocha — soft pastels", preview: ["#1e1e2e", "#45475a", "#cdd6f4"] },
-  { id: "gruvbox",    label: "Gruvbox",    description: "Retro warm earth",     preview: ["#282828", "#504945", "#ebdbb2"] },
-  { id: "nord",       label: "Nord",       description: "Cool arctic blues",    preview: ["#2e3440", "#4c566a", "#eceff4"] },
 ];
 
 const VENDOR_IDS: AIVendor[] = ["groq", "openai", "anthropic", "ollama"];
@@ -233,8 +226,8 @@ export default function SettingsModal({ onClose }: Props) {
                     <button
                       onClick={() => restartApp().catch(() => {})}
                       className="flex items-center gap-2 w-full justify-center px-3 py-2
-                                 rounded-lg bg-foreground text-surface text-xs font-medium
-                                 hover:opacity-90 transition-opacity"
+                                 rounded-lg bg-accent-gradient text-[var(--accent-contrast)] text-xs font-semibold
+                                 glow-accent-sm hover:brightness-105 transition-all"
                     >
                       <RotateCw className="w-3.5 h-3.5" />
                       Restart to apply
@@ -265,8 +258,8 @@ export default function SettingsModal({ onClose }: Props) {
                       }
                     }}
                     className="flex items-center gap-2 w-full justify-center px-3 py-2
-                               rounded-lg bg-foreground text-surface text-xs font-medium
-                               hover:opacity-90 transition-opacity disabled:opacity-50"
+                               rounded-lg bg-accent-gradient text-[var(--accent-contrast)] text-xs font-semibold
+                               glow-accent-sm hover:brightness-105 transition-all disabled:opacity-50"
                   >
                     {isUpdating ? (
                       <><RefreshCw className="w-3.5 h-3.5 animate-spin" /> Downloading…</>
@@ -286,28 +279,42 @@ export default function SettingsModal({ onClose }: Props) {
                   Theme
                 </span>
               </div>
-              <div className="grid grid-cols-1 gap-1.5">
-                {THEME_OPTIONS.map((t) => (
-                  <button
-                    key={t.id}
-                    onClick={() => setTheme(t.id)}
-                    className={`flex items-center justify-between px-3 py-2 rounded-lg border
-                                text-sm transition-all duration-150
-                                ${theme === t.id
-                                  ? "bg-surface-hover border-border-active text-foreground"
-                                  : "bg-transparent border-border text-foreground-secondary hover:text-foreground hover:border-border-active"
-                                }`}
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="flex items-center gap-0.5">
-                        {t.preview.map((c, i) => (
-                          <div key={i} className="w-3.5 h-3.5 rounded-full border border-border" style={{ backgroundColor: c }} />
-                        ))}
-                      </div>
-                      <span className="font-medium">{t.label}</span>
+              <div className="space-y-3">
+                {THEME_GROUPS.map((group) => (
+                  <div key={group}>
+                    <div className="text-[10px] font-medium uppercase tracking-wider text-muted mb-1.5 px-0.5">
+                      {group}
                     </div>
-                    <span className="text-xs text-muted">{t.description}</span>
-                  </button>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      {THEMES.filter((t) => t.group === group).map((t) => {
+                        const selected = theme === t.id;
+                        return (
+                          <button
+                            key={t.id}
+                            onClick={() => setTheme(t.id)}
+                            title={t.description}
+                            className={`flex items-center gap-2.5 px-2.5 py-2 rounded-lg border
+                                        text-sm transition-all duration-150
+                                        ${selected
+                                          ? "border-accent bg-accent-soft text-foreground"
+                                          : "bg-transparent border-border text-foreground-secondary hover:text-foreground hover:border-border-active"
+                                        }`}
+                          >
+                            <span
+                              className="flex-shrink-0 w-7 h-7 rounded-md border border-border overflow-hidden relative"
+                              style={{ background: t.swatch[0] }}
+                            >
+                              <span
+                                className="absolute bottom-0 right-0 w-4 h-4 rounded-tl-md"
+                                style={{ background: `linear-gradient(135deg, ${t.swatch[1]}, ${t.swatch[2]})` }}
+                              />
+                            </span>
+                            <span className="font-medium text-xs truncate">{t.label}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
                 ))}
               </div>
             </section>
@@ -327,7 +334,7 @@ export default function SettingsModal({ onClose }: Props) {
                     onClick={() => selectVendor(v)}
                     className={`px-3 py-2 rounded-lg border text-sm font-medium transition-all
                                 ${localVendor === v
-                                  ? "bg-surface-hover border-border-active text-foreground"
+                                  ? "bg-accent-soft border-accent text-foreground"
                                   : "bg-transparent border-border text-foreground-secondary hover:text-foreground hover:border-border-active"
                                 }`}
                   >
@@ -397,7 +404,7 @@ export default function SettingsModal({ onClose }: Props) {
                       className={`flex items-center justify-between px-3 py-2 rounded-lg border
                                   text-sm transition-all duration-150
                                   ${modelDraft === m.id
-                                    ? "bg-surface-hover border-border-active text-foreground"
+                                    ? "bg-accent-soft border-accent text-foreground"
                                     : "bg-transparent border-border text-foreground-secondary hover:text-foreground hover:border-border-active"
                                   }`}
                     >
@@ -501,7 +508,7 @@ export default function SettingsModal({ onClose }: Props) {
                     className={`flex items-center justify-between px-3 py-2.5 rounded-lg border cursor-pointer
                                 text-sm transition-all duration-150
                                 ${localSound === s.id
-                                  ? "bg-surface-hover border-border-active text-foreground"
+                                  ? "bg-accent-soft border-accent text-foreground"
                                   : "bg-transparent border-border text-foreground-secondary hover:text-foreground hover:border-border-active"
                                 }`}
                     onClick={() => setLocalSound(s.id)}
@@ -665,12 +672,12 @@ function Toggle({
         )}
       </div>
       <div
-        className={`w-9 h-5 rounded-full relative transition-colors flex-shrink-0
-                    ${value ? "bg-foreground" : "bg-surface-hover"}`}
+        className={`w-9 h-5 rounded-full relative transition-all flex-shrink-0
+                    ${value ? "bg-accent-gradient glow-accent-sm" : "bg-surface-hover"}`}
       >
         <div
           className={`absolute top-0.5 w-4 h-4 rounded-full transition-all
-                      ${value ? "left-[18px] bg-surface" : "left-0.5 bg-muted"}`}
+                      ${value ? "left-[18px] bg-[var(--accent-contrast)]" : "left-0.5 bg-muted"}`}
         />
       </div>
     </button>
