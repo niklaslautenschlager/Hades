@@ -21,6 +21,37 @@ Dropbox is strongly recommended, since it works on almost all Platforms.
 
 ---
 
+## Dropbox (Recommended)
+
+### Linux
+
+```bash
+# Download the official daemon
+cd ~ && wget -O - "https://www.dropbox.com/download?plat=lnx.x86_64" | tar xzf -
+~/.dropbox-dist/dropboxd &
+# Follow the browser link that appears to link your account
+```
+
+For a tray icon, install the `dropbox` package from AUR:
+```bash
+yay -S dropbox
+```
+
+Default sync folder: `~/Dropbox/`
+
+### macOS / Windows
+
+Download from [dropbox.com/install](https://www.dropbox.com/install).
+
+| Platform | Default sync folder |
+|----------|-------------------|
+| macOS    | `~/Dropbox/` |
+| Windows  | `C:\Users\<you>\Dropbox\` |
+
+**Path to use in Hades:** `~/Dropbox/HadesNotes`
+
+---
+
 ## Google Drive
 
 ### Linux
@@ -217,36 +248,6 @@ Download the installer from [syncthing.net/downloads](https://syncthing.net/down
 
 ---
 
-## Dropbox
-
-### Linux
-
-```bash
-# Download the official daemon
-cd ~ && wget -O - "https://www.dropbox.com/download?plat=lnx.x86_64" | tar xzf -
-~/.dropbox-dist/dropboxd &
-# Follow the browser link that appears to link your account
-```
-
-For a tray icon, install the `dropbox` package from AUR:
-```bash
-yay -S dropbox
-```
-
-Default sync folder: `~/Dropbox/`
-
-### macOS / Windows
-
-Download from [dropbox.com/install](https://www.dropbox.com/install).
-
-| Platform | Default sync folder |
-|----------|-------------------|
-| macOS    | `~/Dropbox/` |
-| Windows  | `C:\Users\<you>\Dropbox\` |
-
-**Path to use in Hades:** `~/Dropbox/HadesNotes`
-
----
 
 ## OneDrive
 
