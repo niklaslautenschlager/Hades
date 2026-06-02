@@ -155,6 +155,12 @@ function resolveOrCreateFolderPath(
     if (!fid) {
       fid = uid();
       pathToId.set(path, fid);
+    }
+    // CRITICAL: ensure an actual folder node exists for this id. The id may be
+    // known from the folder index (_hades.json) written by another device, in
+    // which case no folder NoteFile exists yet locally. Without this, incoming
+    // notes get attached to a parentId that has no node → orphaned & invisible.
+    if (!notes.some((n) => n.id === fid && n.isFolder)) {
       notes.push({
         id: fid, name: parts[i], content: "", tags: [],
         parentId, isFolder: true,
@@ -198,8 +204,10 @@ export async function initialSync(
     } catch {}
   }
 
-  // Build folder-path → id map
-  const pathToId = new Map<string, string>(Object.entries(index.folderIds));
+  // Build folder-path → id map. Local folders are authoritative (so a folder
+  // that already exists locally keeps its id and we don't create a duplicate);
+  // the on-disk index only fills in paths we don't have locally.
+  const pathToId = new Map<string, string>();
   for (const f of localNotes.filter(n => n.isFolder)) {
     const segs = [safeName(f.name)];
     let pid = f.parentId;
@@ -209,8 +217,10 @@ export async function initialSync(
       segs.unshift(safeName(p.name));
       pid = p.parentId;
     }
-    const path = segs.join("/");
-    if (!pathToId.has(path)) pathToId.set(path, f.id);
+    pathToId.set(segs.join("/"), f.id);
+  }
+  for (const [path, id] of Object.entries(index.folderIds)) {
+    if (!pathToId.has(path)) pathToId.set(path, id);
   }
 
   // Merge

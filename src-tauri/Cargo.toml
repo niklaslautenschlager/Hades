@@ -1,6 +1,6 @@
 [package]
 name = "hades"
-version = "0.5.1"
+version = "0.5.2"
 description = "Hades — Linux Productivity Suite"
 authors = []
 edition = "2021"
