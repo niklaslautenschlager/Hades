@@ -17,16 +17,21 @@ import { AnimatePresence } from "framer-motion";
 import { useShallow } from "zustand/react/shallow";
 import { useStore } from "../../store/useStore";
 import FileTree from "./FileTree";
+import LibraryPanel from "./LibraryPanel";
 import Editor from "./Editor";
 import PdfViewer from "./PdfViewer";
 import Calculator from "./Calculator";
 import { exportAsMarkdown, exportAsPdf } from "../../lib/noteExport";
 import { importObsidianVault } from "../../lib/noteImport";
+import { indexNote } from "../../lib/ragIndex";
 
 export default function NotepadModule() {
   const {
     notes,
     activeNoteId,
+    openNoteIds,
+    setActiveNote,
+    closeNoteTab,
     isVimMode,
     toggleVimMode,
     updateNote,
@@ -37,6 +42,9 @@ export default function NotepadModule() {
     useShallow((s) => ({
       notes: s.notes,
       activeNoteId: s.activeNoteId,
+      openNoteIds: s.openNoteIds,
+      setActiveNote: s.setActiveNote,
+      closeNoteTab: s.closeNoteTab,
       isVimMode: s.isVimMode,
       toggleVimMode: s.toggleVimMode,
       updateNote: s.updateNote,
@@ -47,10 +55,21 @@ export default function NotepadModule() {
   );
 
   const activeNote = notes.find((n) => n.id === activeNoteId && !n.isFolder);
+
+  // Open notes as tabs, in tab order, skipping any that no longer exist.
+  const openTabs = useMemo(
+    () =>
+      openNoteIds
+        .map((id) => notes.find((n) => n.id === id && !n.isFolder))
+        .filter((n): n is NonNullable<typeof n> => !!n),
+    [openNoteIds, notes]
+  );
+
   const [tagInput, setTagInput]       = useState("");
   const [showTagInput, setShowTagInput] = useState(false);
   const [showExportMenu, setShowExportMenu] = useState(false);
   const [showSidebar, setShowSidebar] = useState(true);
+  const [sidebarTab, setSidebarTab] = useState<"files" | "library">("files");
   const [showCalculator, setShowCalculator] = useState(false);
   const [showOverflow, setShowOverflow] = useState(false);
 
@@ -92,8 +111,16 @@ export default function NotepadModule() {
   }
   function onSidebarDividerPointerUp() { sidebarDragRef.current = null; }
 
+  const indexTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const handleContentChange = useCallback(
-    (c: string) => { if (activeNote) updateNote(activeNote.id, { content: c }); },
+    (c: string) => {
+      if (!activeNote) return;
+      updateNote(activeNote.id, { content: c });
+      // Debounced re-index so RAG stays current (no-op until an index exists).
+      if (indexTimerRef.current) clearTimeout(indexTimerRef.current);
+      const snapshot = { ...activeNote, content: c, updatedAt: new Date().toISOString() };
+      indexTimerRef.current = setTimeout(() => { void indexNote(snapshot); }, 4000);
+    },
     [activeNote, updateNote]
   );
 
@@ -135,7 +162,27 @@ export default function NotepadModule() {
       {showSidebar && (
         <>
           <aside style={{ width: sidebarWidth }} className="flex-shrink-0 border-r border-border min-w-0">
-            <FileTree />
+            <div className="flex flex-col h-full">
+              {/* Files / Library switch */}
+              <div className="flex items-center gap-1 px-2 pt-2 flex-shrink-0">
+                {(["files", "library"] as const).map((tab) => (
+                  <button
+                    key={tab}
+                    onClick={() => setSidebarTab(tab)}
+                    className={`flex-1 px-2 py-1 rounded-lg text-xs font-medium capitalize transition-all
+                                ${sidebarTab === tab
+                                  ? "bg-accent-soft text-foreground"
+                                  : "text-muted hover:text-foreground-secondary hover:bg-surface-hover"
+                                }`}
+                  >
+                    {tab}
+                  </button>
+                ))}
+              </div>
+              <div className="flex-1 min-h-0">
+                {sidebarTab === "files" ? <FileTree /> : <LibraryPanel />}
+              </div>
+            </div>
           </aside>
           <div
             className="w-[5px] flex-shrink-0 cursor-col-resize hover:bg-surface-hover transition-colors duration-150"
@@ -151,6 +198,40 @@ export default function NotepadModule() {
       <div className="flex-1 flex flex-col min-w-0 min-h-0">
         {activeNote ? (
           <>
+            {/* Note tabs */}
+            {openTabs.length > 0 && (
+              <div className="flex items-stretch border-b border-border flex-shrink-0 overflow-x-auto"
+                   style={{ scrollbarWidth: "none" }}>
+                {openTabs.map((tab) => {
+                  const active = tab.id === activeNoteId;
+                  return (
+                    <div
+                      key={tab.id}
+                      onClick={() => setActiveNote(tab.id)}
+                      className={`group flex items-center gap-1.5 pl-3 pr-1.5 py-1.5 max-w-[180px]
+                                  border-r border-border cursor-pointer flex-shrink-0 transition-colors
+                                  ${active
+                                    ? "bg-surface-elevated text-foreground"
+                                    : "text-muted hover:text-foreground-secondary hover:bg-surface-hover"
+                                  }`}
+                      title={tab.name}
+                    >
+                      <span className="text-xs truncate">{tab.name || "Untitled"}</span>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); closeNoteTab(tab.id); }}
+                        className={`flex items-center justify-center w-4 h-4 rounded flex-shrink-0
+                                    hover:bg-surface-hover hover:text-foreground transition-all
+                                    ${active ? "opacity-70" : "opacity-0 group-hover:opacity-70"}`}
+                        title="Close tab"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
             {/* Toolbar */}
             <div className="flex items-center px-4 py-2 border-b border-border flex-shrink-0 gap-1.5 min-w-0">
 

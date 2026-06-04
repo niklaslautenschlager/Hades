@@ -1,5 +1,7 @@
 # Cloud Sync Setup
 
+> Part of the [Hades documentation](README.md). See also: [Notes](notes.md) · [Troubleshooting](troubleshooting.md).
+
 Hades does not talk to any cloud API directly. Instead it writes your notes as `.md` files into a folder on your local disk. Your cloud provider's desktop client then syncs that folder to the cloud in the background. This means:
 
 - **Any cloud storage that syncs a local folder works** — Google Drive, iCloud Drive, Dropbox, Nextcloud, Syncthing, OneDrive, etc.
@@ -16,7 +18,7 @@ Hades does not talk to any cloud API directly. Instead it writes your notes as `
 4. Click the folder picker and select your sync folder (see provider-specific paths below)
 5. Click **Sync now** for the first full upload
 
-Hades will auto-save every **5 minutes** when changes exist. If you close the app with unsaved changes a small "Saving…" bar appears at the bottom — you can cancel it and quit immediately if needed.
+Once enabled, Hades syncs **automatically about every 30 seconds** while it's open — pulling in changes from your other devices *and* pushing your local edits. It also syncs on startup. If you close the app with unsaved changes a small "Saving…" bar appears at the bottom — you can cancel it and quit immediately if needed.
 Dropbox is strongly recommended, since it works on almost all Platforms.
 
 ---

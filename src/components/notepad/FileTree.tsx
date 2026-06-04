@@ -93,17 +93,18 @@ interface FileNodeProps {
 }
 
 function FileNode({ file, depth, allFiles }: FileNodeProps) {
-  const { activeNoteId, setActiveNote, updateNote, deleteNote, moveNote } = useStore(
+  const { activeNoteId, setActiveNote, updateNote, deleteNote, moveNote, expanded, setFolderExpanded } = useStore(
     useShallow((s) => ({
       activeNoteId: s.activeNoteId,
       setActiveNote: s.setActiveNote,
       updateNote: s.updateNote,
       deleteNote: s.deleteNote,
       moveNote: s.moveNote,
+      expanded: s.expandedFolderIds.includes(file.id),
+      setFolderExpanded: s.setFolderExpanded,
     }))
   );
 
-  const [expanded, setExpanded] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [nameDraft, setNameDraft] = useState(file.name);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -126,7 +127,7 @@ function FileNode({ file, depth, allFiles }: FileNodeProps) {
 
   function handleClick() {
     if (file.isFolder) {
-      setExpanded((v) => !v);
+      setFolderExpanded(file.id, !expanded);
     } else {
       setActiveNote(file.id);
     }
@@ -241,10 +242,10 @@ function FileNode({ file, depth, allFiles }: FileNodeProps) {
   useEffect(() => {
     if (!file.isFolder || !rowRef.current) return;
     const el = rowRef.current;
-    const handler = () => setExpanded(true);
+    const handler = () => setFolderExpanded(file.id, true);
     el.addEventListener("expand-folder", handler);
     return () => el.removeEventListener("expand-folder", handler);
-  }, [file.isFolder]);
+  }, [file.isFolder, file.id, setFolderExpanded]);
 
   return (
     <div>
@@ -397,16 +398,38 @@ function RootDropZone() {
 // ─── FileTree (main export) ──────────────────────────────────────────────────
 
 export default function FileTree() {
-  const { notes, addNote, addFolder, moveNote } = useStore(
+  const { notes, addNote, addFolder, moveNote, activeNoteId, setFolderExpanded } = useStore(
     useShallow((s) => ({
       notes: s.notes,
       addNote: s.addNote,
       addFolder: s.addFolder,
       moveNote: s.moveNote,
+      activeNoteId: s.activeNoteId,
+      setFolderExpanded: s.setFolderExpanded,
     }))
   );
 
   const [search, setSearch] = useState("");
+
+  // New notes/folders nest under the active folder (or the active note's folder),
+  // falling back to root. The target folder is expanded so the new item is visible.
+  function targetParentId(): string | null {
+    const active = notes.find((n) => n.id === activeNoteId);
+    if (!active) return null;
+    return active.isFolder ? active.id : active.parentId;
+  }
+
+  function createNote() {
+    const parentId = targetParentId();
+    if (parentId) setFolderExpanded(parentId, true);
+    addNote(parentId);
+  }
+
+  function createFolder() {
+    const parentId = targetParentId();
+    if (parentId) setFolderExpanded(parentId, true);
+    addFolder(parentId);
+  }
 
   const searchLower = search.toLowerCase().trim();
   const isSearching = searchLower.length > 0;
@@ -456,7 +479,7 @@ export default function FileTree() {
         <span className="text-xs font-medium text-muted uppercase tracking-wider">Files</span>
         <div className="flex items-center gap-1">
           <button
-            onClick={() => addNote(null)}
+            onClick={createNote}
             title="New note"
             className="flex items-center justify-center w-6 h-6 rounded text-muted
                        hover:text-foreground hover:bg-surface-hover transition-all"
@@ -464,7 +487,7 @@ export default function FileTree() {
             <FileText className="w-3 h-3" />
           </button>
           <button
-            onClick={() => addFolder(null)}
+            onClick={createFolder}
             title="New folder"
             className="flex items-center justify-center w-6 h-6 rounded text-muted
                        hover:text-foreground hover:bg-surface-hover transition-all"

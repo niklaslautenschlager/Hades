@@ -1,5 +1,5 @@
 import { useState, useRef } from "react";
-import { Plus, Trash2, AlertCircle, Calendar as CalIcon } from "lucide-react";
+import { Plus, Trash2, AlertCircle, Calendar as CalIcon, Timer, Minus } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { format, parseISO, isBefore, isToday, isTomorrow } from "date-fns";
 import { useShallow } from "zustand/react/shallow";
@@ -17,16 +17,23 @@ interface TaskItemProps {
 }
 
 function TaskItem({ task }: TaskItemProps) {
-  const { toggleTask, deleteTask, editTask } = useStore(
+  const { toggleTask, deleteTask, editTask, activeTaskId, setActivePomodoroTask, setTaskEstimate } = useStore(
     useShallow((s) => ({
       toggleTask: s.toggleTask,
       deleteTask: s.deleteTask,
       editTask: s.editTask,
+      activeTaskId: s.activeTaskId,
+      setActivePomodoroTask: s.setActivePomodoroTask,
+      setTaskEstimate: s.setTaskEstimate,
     }))
   );
 
   const [isEditing, setIsEditing] = useState(false);
   const [editText, setEditText] = useState(task.text);
+
+  const isFocused = activeTaskId === task.id;
+  const estimate = task.estimatedSessions ?? 0;
+  const doneSessions = task.completedSessions ?? 0;
 
   function commitEdit() {
     if (editText.trim()) {
@@ -41,7 +48,8 @@ function TaskItem({ task }: TaskItemProps) {
   return (
     <div className={`group flex items-center gap-3 px-4 py-3.5 surface
                     cursor-default select-none hover:border-border-active transition-all duration-150
-                    ${overdue ? "border-red-900/50" : ""}`}>
+                    ${overdue ? "border-red-900/50" : ""}
+                    ${isFocused ? "border-accent glow-accent-sm" : ""}`}>
       {/* Checkbox */}
       <button
         onClick={() => toggleTask(task.id)}
@@ -108,14 +116,23 @@ function TaskItem({ task }: TaskItemProps) {
                 {task.text}
               </span>
             </div>
-            {task.dueDate && (
-              <div className={`flex items-center gap-1 mt-0.5 text-xs
-                              ${overdue ? "text-red-400" : "text-muted"}`}>
-                <CalIcon className="w-3 h-3" />
-                {formatDueDate(task.dueDate)}
-                {overdue && <span className="ml-1 font-medium">overdue</span>}
-              </div>
-            )}
+            <div className="flex items-center gap-3 mt-0.5">
+              {task.dueDate && (
+                <div className={`flex items-center gap-1 text-xs
+                                ${overdue ? "text-red-400" : "text-muted"}`}>
+                  <CalIcon className="w-3 h-3" />
+                  {formatDueDate(task.dueDate)}
+                  {overdue && <span className="ml-1 font-medium">overdue</span>}
+                </div>
+              )}
+              {estimate > 0 && !task.completed && (
+                <div className={`flex items-center gap-1 text-xs ${isFocused ? "text-accent" : "text-muted"}`}
+                     title="Focus sessions completed / estimated">
+                  <Timer className="w-3 h-3" />
+                  <span className="tabular-nums">{doneSessions}/{estimate}</span>
+                </div>
+              )}
+            </div>
 
             <motion.div
               className="absolute left-0 right-0 top-1/2 -translate-y-1/2 h-px bg-muted"
@@ -126,6 +143,43 @@ function TaskItem({ task }: TaskItemProps) {
           </>
         )}
       </div>
+
+      {/* Estimate stepper + focus + delete */}
+      {!task.completed && (
+        <div className={`flex-shrink-0 flex items-center gap-0.5 mr-1 transition-all
+                         ${estimate > 0 ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}>
+          <button
+            onClick={() => setTaskEstimate(task.id, Math.max(0, estimate - 1))}
+            className="flex items-center justify-center w-5 h-6 rounded text-muted hover:text-foreground-secondary hover:bg-surface-hover transition-all"
+            title="Fewer estimated sessions"
+          >
+            <Minus className="w-3 h-3" />
+          </button>
+          <span className="flex items-center justify-center gap-0.5 text-xs text-muted w-8 text-center tabular-nums select-none">
+            <Timer className="w-3 h-3 flex-shrink-0" />{estimate}
+          </span>
+          <button
+            onClick={() => setTaskEstimate(task.id, estimate + 1)}
+            className="flex items-center justify-center w-5 h-6 rounded text-muted hover:text-foreground-secondary hover:bg-surface-hover transition-all"
+            title="More estimated sessions"
+          >
+            <Plus className="w-3 h-3" />
+          </button>
+        </div>
+      )}
+
+      {!task.completed && (
+        <button
+          onClick={() => setActivePomodoroTask(isFocused ? null : task.id)}
+          className={`flex-shrink-0 flex items-center justify-center w-6 h-6 rounded-lg transition-all
+                      ${isFocused
+                        ? "text-accent opacity-100"
+                        : "text-muted hover:text-foreground-secondary hover:bg-surface-hover opacity-0 group-hover:opacity-100"}`}
+          title={isFocused ? "Unlink from focus timer" : "Focus on this task in the Pomodoro timer"}
+        >
+          <Timer className="w-3.5 h-3.5" />
+        </button>
+      )}
 
       {/* Delete */}
       <button
@@ -141,11 +195,12 @@ function TaskItem({ task }: TaskItemProps) {
 }
 
 export default function TasksModule() {
-  const { tasks, addTask, clearCompletedTasks } = useStore(
+  const { tasks, addTask, clearCompletedTasks, clearAllTasks } = useStore(
     useShallow((s) => ({
       tasks: s.tasks,
       addTask: s.addTask,
       clearCompletedTasks: s.clearCompletedTasks,
+      clearAllTasks: s.clearAllTasks,
     }))
   );
 
@@ -179,6 +234,17 @@ export default function TasksModule() {
               >
                 <Trash2 className="w-3 h-3" />
                 Clear completed
+              </button>
+            )}
+            {tasks.some((t) => !t.linkedEventId) && (
+              <button
+                onClick={() => {
+                  if (confirm("Clear all tasks? Calendar deadline tasks are kept.")) clearAllTasks();
+                }}
+                className="flex items-center gap-1 text-xs text-muted hover:text-red-400 transition-colors"
+              >
+                <Trash2 className="w-3 h-3" />
+                Clear all
               </button>
             )}
           </div>

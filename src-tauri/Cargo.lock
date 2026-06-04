@@ -1272,7 +1272,7 @@ dependencies = [
 
 [[package]]
 name = "hades"
-version = "0.5.2"
+version = "0.6.0"
 dependencies = [
  "reqwest 0.12.28",
  "serde",

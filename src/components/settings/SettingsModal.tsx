@@ -1,10 +1,11 @@
-import { useState } from "react";
-import { X, Key, Timer, Eye, EyeOff, Cpu, Volume2, Play, Palette, CalendarClock, Sliders, Cloud, FolderOpen, CloudOff, RefreshCw, Download, RotateCw, ArrowUpCircle } from "lucide-react";
+import { useState, useEffect } from "react";
+import { X, Key, Timer, Eye, EyeOff, Cpu, Volume2, Play, Palette, CalendarClock, Sliders, Cloud, FolderOpen, CloudOff, RefreshCw, Download, RotateCw, ArrowUpCircle, Sparkles, AlertTriangle, Trash2, BookOpen, Database, Bot } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useShallow } from "zustand/react/shallow";
-import { open } from "@tauri-apps/plugin-dialog";
+import { open, ask } from "@tauri-apps/plugin-dialog";
 import { useStore, type SoundType, type AIVendor } from "../../store/useStore";
-import { AI_MODELS, VENDOR_LABELS, VENDOR_KEY_URLS } from "../../lib/ai";
+import { AI_MODELS, VENDOR_LABELS, VENDOR_KEY_URLS, VENDOR_INFO, VENDOR_TIER_LABELS } from "../../lib/ai";
+import { getRagStatus, rebuildIndex, clearIndex, EMBED_MODEL } from "../../lib/ragIndex";
 import { THEMES, THEME_GROUPS } from "../../lib/themes";
 import { previewSound } from "../../lib/sound";
 import { syncDirtyNotes } from "../../lib/noteSync";
@@ -22,7 +23,7 @@ const SOUND_OPTIONS: { id: SoundType; label: string; description: string }[] = [
   { id: "none", label: "None", description: "No sound" },
 ];
 
-const VENDOR_IDS: AIVendor[] = ["groq", "openai", "anthropic", "ollama"];
+const VENDOR_IDS: AIVendor[] = ["groq", "openai", "anthropic", "deepseek", "ollama"];
 
 export default function SettingsModal({ onClose }: Props) {
   const {
@@ -41,6 +42,13 @@ export default function SettingsModal({ onClose }: Props) {
     aiVendorConfigs,
     setAIVendor,
     setAIVendorConfig,
+    aiEnabled,
+    setAiEnabled,
+    aiUseStudyContext,
+    setAiUseStudyContext,
+    agentMode,
+    setAgentMode,
+    wipeAllAIData,
     autoSyncDeadlines,
     setAutoSyncDeadlines,
     showWeekNumbers,
@@ -87,6 +95,13 @@ export default function SettingsModal({ onClose }: Props) {
       aiVendorConfigs: s.aiVendorConfigs,
       setAIVendor: s.setAIVendor,
       setAIVendorConfig: s.setAIVendorConfig,
+      aiEnabled: s.aiEnabled,
+      setAiEnabled: s.setAiEnabled,
+      aiUseStudyContext: s.aiUseStudyContext,
+      setAiUseStudyContext: s.setAiUseStudyContext,
+      agentMode: s.agentMode,
+      setAgentMode: s.setAgentMode,
+      wipeAllAIData: s.wipeAllAIData,
       autoSyncDeadlines: s.autoSyncDeadlines,
       setAutoSyncDeadlines: s.setAutoSyncDeadlines,
       showWeekNumbers: s.showWeekNumbers,
@@ -137,6 +152,46 @@ export default function SettingsModal({ onClose }: Props) {
   const [localVolume, setLocalVolume] = useState(soundVolume);
   const [saved, setSaved] = useState(false);
 
+  type Tab = "ai" | "appearance" | "productivity" | "sync" | "advanced";
+  const [tab, setTab] = useState<Tab>("ai");
+
+  // Study (RAG) index status, loaded lazily for the AI tab.
+  const [ragChunks, setRagChunks] = useState<number | null>(null);
+  const [ragBuilt, setRagBuilt] = useState<string | null>(null);
+  const [ragBusy, setRagBusy] = useState(false);
+  const [ragMsg, setRagMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (tab !== "ai") return;
+    let alive = true;
+    getRagStatus().then((s) => {
+      if (!alive) return;
+      setRagChunks(s.chunks);
+      setRagBuilt(s.lastBuilt);
+    });
+    return () => { alive = false; };
+  }, [tab]);
+
+  async function handleRebuildIndex() {
+    setRagBusy(true);
+    setRagMsg(null);
+    try {
+      const count = await rebuildIndex();
+      setRagChunks(count);
+      setRagBuilt(new Date().toISOString());
+      setRagMsg(`Indexed ${count} chunk${count === 1 ? "" : "s"}.`);
+    } catch (e) {
+      const raw = e instanceof Error ? e.message : String(e);
+      setRagMsg(
+        /connect|refused|fetch|request failed|embedding/i.test(raw)
+          ? `Couldn't reach Ollama embeddings. Run \`ollama pull ${EMBED_MODEL}\` and make sure Ollama is running.`
+          : raw
+      );
+    } finally {
+      setRagBusy(false);
+    }
+  }
+
   function selectVendor(v: AIVendor) {
     setLocalVendor(v);
     const cfg = aiVendorConfigs[v];
@@ -183,11 +238,11 @@ export default function SettingsModal({ onClose }: Props) {
           animate={{ opacity: 1, scale: 1, y: 0 }}
           exit={{ opacity: 0, scale: 0.96, y: 8 }}
           transition={{ type: "spring", stiffness: 400, damping: 30 }}
-          className="w-full max-w-md surface p-6 max-h-[85vh] overflow-y-auto"
+          className="w-full max-w-2xl surface p-6 max-h-[85vh] flex flex-col"
           onClick={(e) => e.stopPropagation()}
         >
           {/* Header */}
-          <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center justify-between mb-5 flex-shrink-0">
             <h2 className="text-base font-semibold text-foreground">Settings</h2>
             <button
               onClick={onClose}
@@ -199,9 +254,41 @@ export default function SettingsModal({ onClose }: Props) {
             </button>
           </div>
 
-          <div className="space-y-6">
+          <div className="flex gap-5 flex-1 min-h-0">
+            {/* Tab rail */}
+            <nav className="flex flex-col gap-1 w-32 flex-shrink-0">
+              {([
+                { id: "ai", label: "AI", icon: Sparkles },
+                { id: "appearance", label: "Appearance", icon: Palette },
+                { id: "productivity", label: "Productivity", icon: Timer },
+                { id: "sync", label: "Sync", icon: Cloud },
+                { id: "advanced", label: "Advanced", icon: Sliders },
+              ] as { id: Tab; label: string; icon: typeof Sparkles }[]).map((t) => {
+                const Icon = t.icon;
+                const active = tab === t.id;
+                return (
+                  <button
+                    key={t.id}
+                    onClick={() => setTab(t.id)}
+                    className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium text-left transition-all
+                                ${active
+                                  ? "bg-accent-soft text-foreground"
+                                  : "text-foreground-secondary hover:text-foreground hover:bg-surface-hover"}`}
+                  >
+                    <Icon className="w-3.5 h-3.5 flex-shrink-0" />
+                    {t.label}
+                    {t.id === "advanced" && updateAvailable && (
+                      <span className="ml-auto w-1.5 h-1.5 rounded-full bg-green-500" />
+                    )}
+                  </button>
+                );
+              })}
+            </nav>
+
+            {/* Content pane */}
+            <div className="flex-1 min-w-0 space-y-6 overflow-y-auto pr-1">
             {/* Update (shown only when available) */}
-            {updateAvailable && (
+            {tab === "advanced" && updateAvailable && (
               <section className="rounded-xl border border-border-active bg-surface-hover px-4 py-3">
                 <div className="flex items-center gap-2 mb-2">
                   <ArrowUpCircle className="w-3.5 h-3.5 text-green-500 flex-shrink-0" />
@@ -272,6 +359,7 @@ export default function SettingsModal({ onClose }: Props) {
             )}
 
             {/* Theme */}
+            {tab === "appearance" && (
             <section>
               <div className="flex items-center gap-2 mb-3">
                 <Palette className="w-3.5 h-3.5 text-muted" />
@@ -318,16 +406,27 @@ export default function SettingsModal({ onClose }: Props) {
                 ))}
               </div>
             </section>
+            )}
 
-            {/* AI Vendor */}
+            {/* AI Assistant */}
+            {tab === "ai" && (
             <section>
               <div className="flex items-center gap-2 mb-3">
-                <Cpu className="w-3.5 h-3.5 text-muted" />
+                <Sparkles className="w-3.5 h-3.5 text-muted" />
                 <span className="text-xs font-medium text-foreground-secondary uppercase tracking-wider">
-                  AI Vendor
+                  AI Assistant
                 </span>
               </div>
-              <div className="grid grid-cols-2 gap-1.5 mb-3">
+
+              <Toggle
+                label="Enable AI features"
+                description="When off, the assistant and all AI options are hidden. Your data stays on your device."
+                value={aiEnabled}
+                onChange={setAiEnabled}
+              />
+
+              <div className={`mt-3 ${aiEnabled ? "" : "opacity-40 pointer-events-none select-none"}`}>
+              <div className="grid grid-cols-2 gap-1.5 mb-2">
                 {VENDOR_IDS.map((v) => (
                   <button
                     key={v}
@@ -341,6 +440,21 @@ export default function SettingsModal({ onClose }: Props) {
                     {VENDOR_LABELS[v]}
                   </button>
                 ))}
+              </div>
+
+              {/* Free/local vs paid/cloud disclaimer */}
+              <div className="flex items-start gap-2 mb-3 px-2.5 py-2 rounded-lg bg-surface-hover border border-border">
+                <span
+                  className={`text-[10px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded flex-shrink-0
+                              ${VENDOR_INFO[localVendor].tier === "local"
+                                ? "bg-green-500/15 text-green-400"
+                                : VENDOR_INFO[localVendor].tier === "free-api"
+                                ? "bg-sky-500/15 text-sky-400"
+                                : "bg-amber-500/15 text-amber-400"}`}
+                >
+                  {VENDOR_TIER_LABELS[VENDOR_INFO[localVendor].tier]}
+                </span>
+                <p className="text-xs text-muted leading-relaxed">{VENDOR_INFO[localVendor].note}</p>
               </div>
 
               {needsKey && (
@@ -364,7 +478,7 @@ export default function SettingsModal({ onClose }: Props) {
                       type={showKey ? "text" : "password"}
                       value={keyDraft}
                       onChange={(e) => setKeyDraft(e.target.value)}
-                      placeholder={localVendor === "groq" ? "gsk_..." : localVendor === "openai" ? "sk-..." : "sk-ant-..."}
+                      placeholder={localVendor === "groq" ? "gsk_..." : localVendor === "anthropic" ? "sk-ant-..." : "sk-..."}
                       className="input-base pr-10 font-mono text-xs"
                     />
                     <button
@@ -414,8 +528,63 @@ export default function SettingsModal({ onClose }: Props) {
                   ))}
                 </div>
               </div>
-            </section>
 
+              {/* Study context (local RAG over notes + PDFs) */}
+              <div className="mt-3 space-y-2.5">
+                <Toggle
+                  label="Use my notes as context"
+                  description="Semantically retrieves from your notes & PDF library when you chat. Only fully private with Ollama — cloud vendors receive the retrieved text."
+                  value={aiUseStudyContext}
+                  onChange={setAiUseStudyContext}
+                />
+
+                {/* Study index (RAG) */}
+                <div className="rounded-lg border border-border px-3 py-2.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <Database className="w-3.5 h-3.5 text-muted flex-shrink-0" />
+                      <span className="text-xs text-foreground-secondary truncate">
+                        {ragChunks === null
+                          ? "Study index"
+                          : ragChunks === 0
+                          ? "Study index — empty"
+                          : `${ragChunks} chunk${ragChunks === 1 ? "" : "s"}${ragBuilt ? ` · ${new Date(ragBuilt).toLocaleDateString()}` : ""}`}
+                      </span>
+                    </div>
+                    <button
+                      onClick={handleRebuildIndex}
+                      disabled={ragBusy}
+                      className="btn-ghost text-xs border border-border flex items-center gap-1.5 flex-shrink-0 disabled:opacity-50"
+                    >
+                      {ragBusy ? <RefreshCw className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+                      {ragBusy ? "Indexing…" : "Rebuild"}
+                    </button>
+                  </div>
+                  <p className="text-[11px] text-muted mt-1.5 leading-relaxed">
+                    Embeds locally via Ollama (<code className="font-mono">{EMBED_MODEL}</code>). Notes re-index automatically as you edit.
+                  </p>
+                  {ragMsg && <p className="text-[11px] text-foreground-secondary mt-1">{ragMsg}</p>}
+                </div>
+
+                {/* Agent mode */}
+                <Toggle
+                  label="Agent mode"
+                  description="Let Socrates act on the app — create tasks, calendar events, flashcards & notes from your requests. It always tells you what it did."
+                  value={agentMode}
+                  onChange={setAgentMode}
+                />
+                <div className="flex items-center gap-1.5 px-0.5">
+                  <Bot className="w-3 h-3 text-muted flex-shrink-0" />
+                  <p className="text-xs text-muted">Additive only — there are no delete actions.</p>
+                </div>
+              </div>
+              </div>
+            </section>
+            )}
+
+            {/* Productivity tab */}
+            {tab === "productivity" && (
+            <>
             {/* Calendar / Productivity Behavior */}
             <section>
               <div className="flex items-center gap-2 mb-3">
@@ -547,8 +716,11 @@ export default function SettingsModal({ onClose }: Props) {
                 </div>
               </div>
             </section>
+            </>
+            )}
 
-            {/* Cloud Sync */}
+            {/* Sync tab — Cloud Sync */}
+            {tab === "sync" && (
             <section>
               <div className="flex items-center gap-2 mb-3">
                 <Cloud className="w-3.5 h-3.5 text-muted" />
@@ -631,6 +803,47 @@ export default function SettingsModal({ onClose }: Props) {
                 )}
               </div>
             </section>
+            )}
+
+            {/* Advanced tab — Danger Zone (the Update banner above is also gated here) */}
+            {tab === "advanced" && (
+            <section>
+              <div className="flex items-center gap-2 mb-3">
+                <AlertTriangle className="w-3.5 h-3.5 text-red-400" />
+                <span className="text-xs font-medium text-red-400 uppercase tracking-wider">
+                  Danger Zone
+                </span>
+              </div>
+              <div className="rounded-xl border border-red-900/40 bg-red-950/20 px-4 py-3">
+                <p className="text-sm font-medium text-foreground">Wipe all AI data</p>
+                <p className="text-xs text-muted mt-0.5 mb-3 leading-relaxed">
+                  Permanently deletes every saved conversation, the assistant's memory, and the
+                  local study index. Your API keys and settings are kept. This cannot be undone.
+                </p>
+                <button
+                  onClick={async () => {
+                    const ok = await ask(
+                      "Permanently delete all AI conversations, memory, and the study index? This cannot be undone.",
+                      { title: "Wipe all AI data", kind: "warning", okLabel: "Wipe everything", cancelLabel: "Cancel" }
+                    ).catch(() => false);
+                    if (ok) {
+                      wipeAllAIData();
+                      await clearIndex();
+                      setRagChunks(0);
+                      setRagBuilt(null);
+                      setRagMsg(null);
+                    }
+                  }}
+                  className="flex items-center gap-2 px-3 py-2 rounded-lg border border-red-900/50
+                             text-xs font-semibold text-red-400 hover:bg-red-950/40 transition-all"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  Wipe all AI data
+                </button>
+              </div>
+            </section>
+            )}
+            </div>
           </div>
 
           {/* Actions */}

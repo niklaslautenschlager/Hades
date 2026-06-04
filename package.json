@@ -1,7 +1,7 @@
 {
   "name": "hades",
   "private": true,
-  "version": "0.5.2",
+  "version": "0.6.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -24,6 +24,7 @@
     "@tauri-apps/plugin-fs": "^2.5.1",
     "@tauri-apps/plugin-http": "^2.4.3",
     "@tauri-apps/plugin-store": "^2.2.0",
+    "@types/katex": "^0.16.8",
     "codemirror": "^6.0.1",
     "date-fns": "^4.1.0",
     "framer-motion": "^12.12.2",
@@ -31,8 +32,10 @@
     "html2canvas": "^1.4.1",
     "ical.js": "^2.1.0",
     "jspdf": "^4.2.1",
+    "katex": "^0.17.0",
     "lucide-react": "^0.511.0",
     "marked": "^18.0.4",
+    "pdfjs-dist": "^4.10.38",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "zustand": "^5.0.5"

@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from "react";
-import { X, Calculator as CalcIcon, History as HistoryIcon, Trash2, GripHorizontal } from "lucide-react";
+import { X, Calculator as CalcIcon, History as HistoryIcon, Trash2, GripHorizontal, NotebookPen } from "lucide-react";
 import { motion, useDragControls } from "framer-motion";
+import { insertIntoActiveNote } from "../../lib/editorBridge";
 
 interface Props {
   onClose: () => void;
@@ -254,6 +255,57 @@ const BUTTONS: { label: string; insert?: string; action?: "eq" | "clear" | "back
   ],
 ];
 
+// ─── Expression → LaTeX ──────────────────────────────────────────────────────
+// Converts the calculator's finite function/operator set into KaTeX-renderable
+// LaTeX so an inserted calculation displays as typeset math in the note.
+
+const OPERATORNAME_FNS = ["asin", "acos", "atan", "sinh", "cosh", "tanh", "log2", "abs", "floor", "ceil", "round", "fact", "mod", "pow"];
+const NATIVE_FNS = ["sin", "cos", "tan", "log", "ln", "exp", "max", "min"];
+
+/** Wrap `name(...)` (balanced) with a structural LaTeX form. Non-recursive. */
+function wrapBalanced(s: string, name: string, wrap: (inner: string) => string): string {
+  let out = "";
+  let i = 0;
+  while (i < s.length) {
+    const idx = s.indexOf(name + "(", i);
+    if (idx === -1) { out += s.slice(i); break; }
+    // require a word boundary before the name
+    if (idx > 0 && /[A-Za-z0-9_]/.test(s[idx - 1])) {
+      out += s.slice(i, idx + name.length);
+      i = idx + name.length;
+      continue;
+    }
+    out += s.slice(i, idx);
+    let depth = 0;
+    let j = idx + name.length;
+    for (; j < s.length; j++) {
+      if (s[j] === "(") depth++;
+      else if (s[j] === ")") { depth--; if (depth === 0) break; }
+    }
+    const inner = s.slice(idx + name.length + 1, j);
+    out += wrap(inner);
+    i = j + 1;
+  }
+  return out;
+}
+
+function toLatex(expr: string): string {
+  let s = expr;
+  for (const fn of OPERATORNAME_FNS) s = s.replace(new RegExp(`\\b${fn}\\b`, "g"), `\\operatorname{${fn}}`);
+  for (const fn of NATIVE_FNS) s = s.replace(new RegExp(`\\b${fn}\\b`, "g"), `\\${fn} `);
+  s = s.replace(/\bpi\b/g, "\\pi ");
+  s = s.replace(/\*/g, " \\cdot ");
+  // Brace multi-char exponents so a^bc renders as a^{bc}, not a^b c
+  s = s.replace(/\^(\([^()]*\)|[A-Za-z0-9.]+)/g, (_m, g: string) => {
+    const t = g.startsWith("(") ? g.slice(1, -1) : g;
+    return `^{${t}}`;
+  });
+  // Structural roots last, so the inner text is already transformed
+  s = wrapBalanced(s, "sqrt", (inner) => `\\sqrt{${inner}}`);
+  s = wrapBalanced(s, "cbrt", (inner) => `\\sqrt[3]{${inner}}`);
+  return s.replace(/\s+/g, " ").trim();
+}
+
 export default function Calculator({ onClose }: Props) {
   const [expr, setExpr] = useState("");
   const [result, setResult] = useState("");
@@ -303,6 +355,12 @@ export default function Calculator({ onClose }: Props) {
   function insert(text: string) {
     setExpr((e) => e + text);
     inputRef.current?.focus();
+  }
+
+  function insertResult(e: string, r: string) {
+    if (!e.trim() || !r) return;
+    const ok = insertIntoActiveNote(`$${toLatex(e)} = ${r}$`);
+    setError(ok ? "" : "Open a note to insert");
   }
 
   function pressButton(btn: typeof BUTTONS[number][number]) {
@@ -377,13 +435,20 @@ export default function Calculator({ onClose }: Props) {
           placeholder="Enter expression..."
           className="w-full bg-transparent text-right text-lg font-mono text-foreground outline-none border-none placeholder:text-muted/60"
         />
-        <div className="text-right text-xs font-mono mt-1 min-h-[16px]">
+        <div className="flex items-center justify-end gap-2 text-xs font-mono mt-1 min-h-[16px]">
           {error ? (
-            <span className="text-red-400">{error}</span>
-          ) : result ? (
-            <span className="text-muted">= {result}</span>
-          ) : (
-            <span className="text-muted/40">&nbsp;</span>
+            <span className="text-red-400 mr-auto">{error}</span>
+          ) : null}
+          {result && <span className="text-muted">= {result}</span>}
+          {result && (
+            <button
+              onClick={() => insertResult(expr, result)}
+              title="Insert into note as math"
+              className="flex items-center gap-1 text-muted hover:text-accent transition-colors"
+            >
+              <NotebookPen className="w-3 h-3" />
+              note
+            </button>
           )}
         </div>
       </div>
@@ -407,14 +472,26 @@ export default function Calculator({ onClose }: Props) {
               </div>
               <div className="space-y-0.5">
                 {history.map((h, i) => (
-                  <button
+                  <div
                     key={i}
-                    onClick={() => { setExpr(h.expr); setShowHistory(false); }}
-                    className="w-full text-left px-2 py-1.5 rounded hover:bg-surface-hover transition-colors"
+                    className="group flex items-center gap-1 px-2 py-1.5 rounded hover:bg-surface-hover transition-colors"
                   >
-                    <div className="text-xs text-muted font-mono truncate">{h.expr}</div>
-                    <div className="text-sm text-foreground font-mono">= {h.result}</div>
-                  </button>
+                    <button
+                      onClick={() => { setExpr(h.expr); setShowHistory(false); }}
+                      className="flex-1 min-w-0 text-left"
+                    >
+                      <div className="text-xs text-muted font-mono truncate">{h.expr}</div>
+                      <div className="text-sm text-foreground font-mono">= {h.result}</div>
+                    </button>
+                    <button
+                      onClick={() => insertResult(h.expr, h.result)}
+                      title="Insert into note as math"
+                      className="opacity-0 group-hover:opacity-100 flex-shrink-0 p-1 rounded
+                                 text-muted hover:text-accent transition-all"
+                    >
+                      <NotebookPen className="w-3 h-3" />
+                    </button>
+                  </div>
                 ))}
               </div>
             </>

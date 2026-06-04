@@ -1,9 +1,10 @@
 import { useState, useRef } from "react";
-import { X, Trash2, ChevronUp, ChevronDown, Repeat, AlertCircle, Lock } from "lucide-react";
+import { X, Trash2, ChevronUp, ChevronDown, Repeat, AlertCircle, Lock, Plus } from "lucide-react";
 import { motion } from "framer-motion";
 import { format, parseISO, addHours, addDays, addWeeks, addMonths } from "date-fns";
 import { useShallow } from "zustand/react/shallow";
 import { useStore, type CalendarEvent, type RecurrenceRule } from "../../store/useStore";
+import Dropdown from "../ui/Dropdown";
 
 interface Props {
   event?: CalendarEvent;
@@ -12,8 +13,13 @@ interface Props {
   onClose: () => void;
 }
 
-const COLORS = [
-  "#3f3f46", "#6b7280", "#9ca3af", "#d1d5db", "#374151", "#1f2937",
+// Original base palette shown by default; the rest expand downward on demand.
+const BASE_COLORS = ["#3f3f46", "#6b7280", "#9ca3af", "#d1d5db", "#374151", "#1f2937"];
+const MORE_COLORS = [
+  "#ef4444", "#f97316", "#f59e0b", "#eab308",
+  "#22c55e", "#10b981", "#14b8a6", "#06b6d4",
+  "#3b82f6", "#6366f1", "#8b5cf6", "#a855f7",
+  "#ec4899", "#f43f5e",
 ];
 
 const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -89,7 +95,7 @@ function DateTimePicker({
           type="date"
           value={date}
           onChange={(e) => onChange(buildDT(e.target.value, h, m))}
-          className="bg-transparent text-xs text-foreground-secondary outline-none [color-scheme:dark] flex-1 min-w-0"
+          className="bg-transparent text-xs text-foreground-secondary outline-none flex-1 min-w-0"
         />
         <span className="text-muted text-xs select-none">|</span>
         <DragSegment value={h} max={23} onChange={(v) => onChange(buildDT(date, v, m))} />
@@ -135,15 +141,16 @@ function RecurrenceEditor({
           onChange={(e) => onChange({ ...rule, interval: Math.max(1, parseInt(e.target.value) || 1) })}
           className="input-base w-14 text-center text-xs"
         />
-        <select
+        <Dropdown
+          className="w-32 text-xs"
           value={rule.frequency}
-          onChange={(e) => onChange({ ...rule, frequency: e.target.value as RecurrenceRule["frequency"] })}
-          className="input-base w-auto text-xs"
-        >
-          <option value="daily">day(s)</option>
-          <option value="weekly">week(s)</option>
-          <option value="monthly">month(s)</option>
-        </select>
+          onChange={(frequency) => onChange({ ...rule, frequency })}
+          options={[
+            { value: "daily", label: "day(s)" },
+            { value: "weekly", label: "week(s)" },
+            { value: "monthly", label: "month(s)" },
+          ]}
+        />
       </div>
 
       {/* Days of week (for weekly) */}
@@ -176,15 +183,16 @@ function RecurrenceEditor({
       {/* End condition */}
       <div className="flex items-center gap-2">
         <span className="text-xs text-muted">Ends</span>
-        <select
+        <Dropdown
+          className="w-48 text-xs"
           value={rule.endType}
-          onChange={(e) => onChange({ ...rule, endType: e.target.value as RecurrenceRule["endType"] })}
-          className="input-base w-auto text-xs"
-        >
-          <option value="never">Never</option>
-          <option value="after">After N occurrences</option>
-          <option value="until">Until date</option>
-        </select>
+          onChange={(endType) => onChange({ ...rule, endType })}
+          options={[
+            { value: "never", label: "Never" },
+            { value: "after", label: "After N occurrences" },
+            { value: "until", label: "Until date" },
+          ]}
+        />
       </div>
 
       {rule.endType === "after" && (
@@ -207,7 +215,7 @@ function RecurrenceEditor({
           type="date"
           value={rule.endUntil ?? ""}
           onChange={(e) => onChange({ ...rule, endUntil: e.target.value })}
-          className="input-base text-xs [color-scheme:dark]"
+          className="input-base text-xs"
         />
       )}
     </div>
@@ -241,10 +249,12 @@ export default function EventModal({ event, defaultDate, defaultEndDate, onClose
       ? format(parseISO(event.end), "yyyy-MM-dd'T'HH:mm")
       : format(defaultEnd, "yyyy-MM-dd'T'HH:mm")
   );
-  const [color, setColor] = useState(event?.color ?? COLORS[0]);
+  const [color, setColor] = useState(event?.color ?? BASE_COLORS[0]);
   const [description, setDescription] = useState(event?.description ?? "");
   const [recurrence, setRecurrence] = useState<RecurrenceRule | null>(event?.recurrence ?? null);
   const [isDeadline, setIsDeadline] = useState(event?.isDeadline ?? false);
+  // Auto-expand the extra colors if the event already uses one of them.
+  const [showMoreColors, setShowMoreColors] = useState(MORE_COLORS.includes(event?.color ?? ""));
 
   function generateRecurringEvents(basePayload: Omit<CalendarEvent, "id">, rule: RecurrenceRule) {
     const events: Omit<CalendarEvent, "id">[] = [];
@@ -401,8 +411,8 @@ export default function EventModal({ event, defaultDate, defaultEndDate, onClose
 
               <div>
                 <label className="block text-xs text-muted mb-2">Color</label>
-                <div className="flex items-center gap-2">
-                  {COLORS.map((c) => (
+                <div className="flex flex-wrap items-center gap-2">
+                  {BASE_COLORS.map((c) => (
                     <button
                       key={c}
                       onClick={() => setColor(c)}
@@ -414,7 +424,32 @@ export default function EventModal({ event, defaultDate, defaultEndDate, onClose
                       style={{ backgroundColor: c }}
                     />
                   ))}
+                  <button
+                    type="button"
+                    onClick={() => setShowMoreColors((v) => !v)}
+                    className="w-6 h-6 rounded-full flex items-center justify-center border border-border
+                               text-muted hover:text-foreground hover:border-border-active transition-all duration-150"
+                    title={showMoreColors ? "Fewer colors" : "More colors"}
+                  >
+                    {showMoreColors ? <ChevronUp className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />}
+                  </button>
                 </div>
+                {showMoreColors && (
+                  <div className="flex flex-wrap items-center gap-2 mt-2">
+                    {MORE_COLORS.map((c) => (
+                      <button
+                        key={c}
+                        onClick={() => setColor(c)}
+                        className={`w-6 h-6 rounded-full transition-all duration-150
+                                    ${color === c
+                                      ? "ring-2 ring-offset-2 ring-offset-[var(--color-surface)] ring-foreground"
+                                      : ""
+                                    }`}
+                        style={{ backgroundColor: c }}
+                      />
+                    ))}
+                  </div>
+                )}
               </div>
 
               {/* Deadline toggle */}

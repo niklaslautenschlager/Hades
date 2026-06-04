@@ -1,4 +1,5 @@
 use tauri::Emitter;
+use tauri::Manager;
 
 #[tauri::command]
 async fn fetch_ical(url: String) -> Result<String, String> {
@@ -21,6 +22,40 @@ async fn fetch_ical(url: String) -> Result<String, String> {
     response.text().await.map_err(|e| e.to_string())
 }
 
+// Fetch a remote PDF natively in Rust (mirrors fetch_ical). Doing this here
+// instead of via tauri-plugin-http avoids the webview's CORS policy and the
+// http capability scope, and lets us follow redirects and validate the payload.
+#[tauri::command]
+async fn fetch_pdf(url: String) -> Result<tauri::ipc::Response, String> {
+    let client = reqwest::Client::builder()
+        .user_agent("HadesApp/0.1")
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    let response = client
+        .get(&url)
+        .header("Accept", "application/pdf,*/*")
+        .send()
+        .await
+        .map_err(|e| format!("Request failed: {}", e))?;
+
+    if !response.status().is_success() {
+        return Err(format!("HTTP {}", response.status()));
+    }
+
+    let bytes = response
+        .bytes()
+        .await
+        .map_err(|e| format!("Failed to read response: {}", e))?;
+
+    // Guard against HTML error pages / wrong content-type returned with a 200.
+    if !bytes.starts_with(b"%PDF") {
+        return Err("That URL did not return a PDF file.".to_string());
+    }
+
+    Ok(tauri::ipc::Response::new(bytes.to_vec()))
+}
+
 // ─── Legacy Groq command (kept for backward compatibility) ─────────────────
 #[tauri::command]
 async fn chat_groq(
@@ -35,6 +70,7 @@ async fn chat_groq(
         Some(&api_key),
         &model,
         messages,
+        1024,
         "groq-delta",
         "groq-done",
     )
@@ -51,19 +87,27 @@ async fn chat_completion(
     base_url: Option<String>,
     system: String,
     messages: Vec<serde_json::Value>,
+    max_tokens: Option<u32>,
 ) -> Result<(), String> {
+    let max_tokens = max_tokens.unwrap_or(1024);
     match vendor.as_str() {
         "groq" => {
             let url = "https://api.groq.com/openai/v1/chat/completions".to_string();
             let mut msgs = vec![serde_json::json!({ "role": "system", "content": system })];
             msgs.extend(messages);
-            chat_openai_compatible(&app, &url, Some(&api_key), &model, msgs, "ai-delta", "ai-done").await
+            chat_openai_compatible(&app, &url, Some(&api_key), &model, msgs, max_tokens, "ai-delta", "ai-done").await
         }
         "openai" => {
             let url = "https://api.openai.com/v1/chat/completions".to_string();
             let mut msgs = vec![serde_json::json!({ "role": "system", "content": system })];
             msgs.extend(messages);
-            chat_openai_compatible(&app, &url, Some(&api_key), &model, msgs, "ai-delta", "ai-done").await
+            chat_openai_compatible(&app, &url, Some(&api_key), &model, msgs, max_tokens, "ai-delta", "ai-done").await
+        }
+        "deepseek" => {
+            let url = "https://api.deepseek.com/v1/chat/completions".to_string();
+            let mut msgs = vec![serde_json::json!({ "role": "system", "content": system })];
+            msgs.extend(messages);
+            chat_openai_compatible(&app, &url, Some(&api_key), &model, msgs, max_tokens, "ai-delta", "ai-done").await
         }
         "ollama" => {
             let host = base_url.unwrap_or_else(|| "http://localhost:11434".to_string());
@@ -71,10 +115,10 @@ async fn chat_completion(
             let mut msgs = vec![serde_json::json!({ "role": "system", "content": system })];
             msgs.extend(messages);
             // Ollama doesn't require a key
-            chat_openai_compatible(&app, &url, None, &model, msgs, "ai-delta", "ai-done").await
+            chat_openai_compatible(&app, &url, None, &model, msgs, max_tokens, "ai-delta", "ai-done").await
         }
         "anthropic" => {
-            chat_anthropic(&app, &api_key, &model, &system, messages, "ai-delta", "ai-done").await
+            chat_anthropic(&app, &api_key, &model, &system, messages, max_tokens, "ai-delta", "ai-done").await
         }
         other => Err(format!("Unknown AI vendor: {}", other)),
     }
@@ -86,6 +130,7 @@ async fn chat_openai_compatible(
     api_key: Option<&str>,
     model: &str,
     messages: Vec<serde_json::Value>,
+    max_tokens: u32,
     delta_event: &str,
     done_event: &str,
 ) -> Result<(), String> {
@@ -93,7 +138,7 @@ async fn chat_openai_compatible(
 
     let body = serde_json::json!({
         "model": model,
-        "max_tokens": 1024,
+        "max_tokens": max_tokens,
         "stream": true,
         "messages": messages,
     });
@@ -154,6 +199,7 @@ async fn chat_anthropic(
     model: &str,
     system: &str,
     messages: Vec<serde_json::Value>,
+    max_tokens: u32,
     delta_event: &str,
     done_event: &str,
 ) -> Result<(), String> {
@@ -161,7 +207,7 @@ async fn chat_anthropic(
 
     let body = serde_json::json!({
         "model": model,
-        "max_tokens": 1024,
+        "max_tokens": max_tokens,
         "stream": true,
         "system": system,
         "messages": messages,
@@ -319,6 +365,96 @@ fn restart_app(app: tauri::AppHandle) {
     app.restart();
 }
 
+// ─── App-data file I/O ──────────────────────────────────────────────────────
+// Done in Rust (not tauri-plugin-fs) because the JS fs scope can't reliably
+// write into the app-data dir. Used by the PDF library and the RAG index.
+
+fn resolve_app_data(app: &tauri::AppHandle, rel_path: &str) -> Result<std::path::PathBuf, String> {
+    use std::path::Component;
+    // Reject anything that could escape the app-data dir.
+    let rel = std::path::Path::new(rel_path);
+    for comp in rel.components() {
+        match comp {
+            Component::Normal(_) => {}
+            _ => return Err("Invalid path".to_string()),
+        }
+    }
+    let base = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("No app data dir: {}", e))?;
+    Ok(base.join(rel))
+}
+
+#[tauri::command]
+async fn app_data_write(app: tauri::AppHandle, rel_path: String, contents: Vec<u8>) -> Result<(), String> {
+    let target = resolve_app_data(&app, &rel_path)?;
+    if let Some(parent) = target.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("mkdir failed: {}", e))?;
+    }
+    std::fs::write(&target, &contents).map_err(|e| format!("write failed: {}", e))
+}
+
+#[tauri::command]
+async fn app_data_read(app: tauri::AppHandle, rel_path: String) -> Result<tauri::ipc::Response, String> {
+    let target = resolve_app_data(&app, &rel_path)?;
+    let bytes = std::fs::read(&target).map_err(|e| format!("read failed: {}", e))?;
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
+#[tauri::command]
+async fn app_data_remove(app: tauri::AppHandle, rel_path: String) -> Result<(), String> {
+    let target = resolve_app_data(&app, &rel_path)?;
+    match std::fs::remove_file(&target) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(format!("remove failed: {}", e)),
+    }
+}
+
+// ─── Embeddings (local Ollama) ──────────────────────────────────────────────
+// Batch-embeds text via Ollama's /api/embed. Local-first; no key required.
+
+#[tauri::command]
+async fn embed_texts(base_url: String, model: String, texts: Vec<String>) -> Result<Vec<Vec<f32>>, String> {
+    if texts.is_empty() {
+        return Ok(vec![]);
+    }
+    let host = base_url.trim_end_matches('/');
+    let url = format!("{}/api/embed", host);
+    let client = reqwest::Client::new();
+
+    let resp = client
+        .post(&url)
+        .json(&serde_json::json!({ "model": model, "input": texts }))
+        .send()
+        .await
+        .map_err(|e| format!("Embedding request failed: {}", e))?;
+
+    if !resp.status().is_success() {
+        let status = resp.status().as_u16();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(format!("Embedding error ({}): {}", status, body));
+    }
+
+    let parsed: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+    let arr = parsed["embeddings"]
+        .as_array()
+        .ok_or_else(|| "Malformed embedding response".to_string())?;
+
+    let mut out = Vec::with_capacity(arr.len());
+    for row in arr {
+        let vec: Vec<f32> = row
+            .as_array()
+            .ok_or_else(|| "Malformed embedding row".to_string())?
+            .iter()
+            .map(|v| v.as_f64().unwrap_or(0.0) as f32)
+            .collect();
+        out.push(vec);
+    }
+    Ok(out)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Force X11 backend before GTK initialises to avoid Wayland protocol errors
@@ -345,10 +481,15 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .invoke_handler(tauri::generate_handler![
             fetch_ical,
+            fetch_pdf,
             chat_groq,
             chat_completion,
             install_update,
             restart_app,
+            app_data_write,
+            app_data_read,
+            app_data_remove,
+            embed_texts,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

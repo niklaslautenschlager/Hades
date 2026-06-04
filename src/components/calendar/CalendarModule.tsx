@@ -58,6 +58,10 @@ const VIEW_LABELS: Record<CalendarView, string> = {
   day: "Day",
 };
 
+// Jump to today once per app launch (not on every calendar re-open, so manual
+// navigation within a session is preserved).
+let didInitialJump = false;
+
 export default function CalendarModule() {
   const {
     calendarEvents,
@@ -89,6 +93,14 @@ export default function CalendarModule() {
   useEffect(() => {
     if (autoSyncDeadlines) syncDeadlineTasks();
   }, [calendarEvents, autoSyncDeadlines, syncDeadlineTasks]);
+
+  // On first open after launch, snap to the current month/week/day.
+  useEffect(() => {
+    if (!didInitialJump) {
+      didInitialJump = true;
+      setCalendarDate(new Date().toISOString());
+    }
+  }, [setCalendarDate]);
 
   const currentDate = parseISO(calendarDate);
   const [eventModal, setEventModal] = useState<{
@@ -384,6 +396,7 @@ function MonthView({ currentDate, events, weekStartsOn, showWeekNumbers, onDayCl
                     relative flex flex-col p-2 border-b border-r border-grid
                     cursor-pointer overflow-hidden
                     ${!inMonth ? "opacity-30" : ""}
+                    ${today ? "ring-1 ring-inset ring-[var(--color-border-active)] bg-[var(--accent-soft)]" : ""}
                   `}
                 >
                   <span
@@ -391,7 +404,7 @@ function MonthView({ currentDate, events, weekStartsOn, showWeekNumbers, onDayCl
                       self-start flex items-center justify-center w-6 h-6 rounded-full
                       text-xs font-medium mb-1 transition-colors
                       ${today
-                        ? "bg-accent-gradient text-[var(--accent-contrast)]"
+                        ? "bg-accent-gradient text-[var(--accent-contrast)] glow-accent-sm"
                         : "text-foreground-secondary hover:text-foreground"
                       }
                     `}
@@ -530,14 +543,23 @@ function WeekView({ currentDate, events, weekStartsOn, onSlotClick, onSlotDragCr
         {days.map((day) => (
           <div
             key={day.toISOString()}
-            className="flex-1 py-2.5 text-center border-l border-grid"
+            className={`flex-1 py-2.5 text-center border-l border-grid ${isToday(day) ? "bg-[var(--accent-soft)]" : ""}`}
           >
-            <div className="text-xs font-medium text-muted uppercase tracking-wider">
+            <div className={`text-xs font-medium uppercase tracking-wider ${isToday(day) ? "text-accent" : "text-muted"}`}>
               {format(day, "EEE")}
             </div>
-            <div className={`text-lg font-semibold mt-0.5 ${isToday(day) ? "text-foreground" : "text-foreground-secondary"}`}>
-              {format(day, "d")}
-            </div>
+            {isToday(day) ? (
+              <div className="mt-0.5 flex justify-center">
+                <span className="flex items-center justify-center w-7 h-7 rounded-full text-lg font-semibold
+                                 bg-accent-gradient text-[var(--accent-contrast)] glow-accent-sm">
+                  {format(day, "d")}
+                </span>
+              </div>
+            ) : (
+              <div className="text-lg font-semibold mt-0.5 text-foreground-secondary">
+                {format(day, "d")}
+              </div>
+            )}
           </div>
         ))}
       </div>

@@ -5,8 +5,10 @@ import {
   RotateCcw,
   Target,
   SkipForward,
+  Timer,
+  X,
 } from "lucide-react";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import { useShallow } from "zustand/react/shallow";
 import { useStore, type PomodoroMode } from "../../store/useStore";
 import AIAssistant from "./AIAssistant";
@@ -34,6 +36,11 @@ export default function PomodoroModule() {
     skipSession,
     setPomodoroMode,
     setGoal,
+    activeTask,
+    taskFinishPrompt,
+    setActivePomodoroTask,
+    setTaskFinishPrompt,
+    toggleTask,
   } = useStore(
     useShallow((s) => ({
       pomodoroMode: s.pomodoroMode,
@@ -51,6 +58,13 @@ export default function PomodoroModule() {
       skipSession: s.skipSession,
       setPomodoroMode: s.setPomodoroMode,
       setGoal: s.setGoal,
+      activeTask: s.tasks.find((t) => t.id === s.activeTaskId) ?? null,
+      taskFinishPrompt: s.taskFinishPrompt
+        ? s.tasks.find((t) => t.id === s.taskFinishPrompt) ?? null
+        : null,
+      setActivePomodoroTask: s.setActivePomodoroTask,
+      setTaskFinishPrompt: s.setTaskFinishPrompt,
+      toggleTask: s.toggleTask,
     }))
   );
 
@@ -274,7 +288,77 @@ export default function PomodoroModule() {
             </button>
           )}
         </div>
+
+        {/* Linked focus task */}
+        {activeTask && (
+          <div className="w-full flex items-center gap-2 px-3 py-2.5 rounded-lg border border-accent
+                          bg-surface-elevated glow-accent-sm">
+            <Timer className="w-3.5 h-3.5 text-accent flex-shrink-0" />
+            <span className="flex-1 text-sm text-foreground-secondary truncate">{activeTask.text}</span>
+            {activeTask.estimatedSessions ? (
+              <span className="flex items-center gap-1 text-xs text-muted tabular-nums flex-shrink-0"
+                    title="Focus sessions completed / estimated">
+                <Timer className="w-3 h-3" />
+                {activeTask.completedSessions ?? 0}/{activeTask.estimatedSessions}
+              </span>
+            ) : null}
+            <button
+              onClick={() => setActivePomodoroTask(null)}
+              className="flex-shrink-0 text-muted hover:text-foreground-secondary transition-colors"
+              title="Unlink task"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
       </div>
+
+      {/* "Is this task finished?" prompt */}
+      <AnimatePresence>
+        {taskFinishPrompt && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 backdrop-blur-sm"
+          >
+            <motion.div
+              initial={{ scale: 0.95, y: 8 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.95, y: 8 }}
+              className="surface border border-border rounded-2xl p-6 w-[min(92vw,380px)] shadow-2xl"
+            >
+              <div className="flex items-center gap-2 mb-3">
+                <Target className="w-4 h-4 text-accent" />
+                <h3 className="text-sm font-semibold text-foreground">Is this task finished?</h3>
+              </div>
+              <p className="text-sm text-foreground-secondary mb-1">"{taskFinishPrompt.text}"</p>
+              <p className="text-xs text-muted mb-5">
+                You've completed your estimate of {taskFinishPrompt.estimatedSessions} focus session
+                {taskFinishPrompt.estimatedSessions === 1 ? "" : "s"}.
+              </p>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => {
+                    toggleTask(taskFinishPrompt.id);
+                    setActivePomodoroTask(null);
+                    setTaskFinishPrompt(null);
+                  }}
+                  className="btn-primary flex-1 text-sm"
+                >
+                  Yes, mark done
+                </button>
+                <button
+                  onClick={() => setTaskFinishPrompt(null)}
+                  className="btn-ghost flex-1 text-sm border border-border"
+                >
+                  Keep going
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* ── Resize handle ────────────────────────────────────────────── */}
       <div

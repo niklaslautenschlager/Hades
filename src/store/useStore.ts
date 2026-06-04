@@ -9,7 +9,7 @@ export type GroqModelId =
 
 // ─── AI Vendor Types ────────────────────────────────────────────────────────
 
-export type AIVendor = "groq" | "openai" | "anthropic" | "ollama";
+export type AIVendor = "groq" | "openai" | "anthropic" | "deepseek" | "ollama";
 
 export interface AIVendorConfig {
   apiKey: string;
@@ -48,6 +48,15 @@ export type SoundType = "bell" | "chime" | "gong" | "digital" | "none";
 export interface ChatMessage {
   role: "user" | "assistant";
   content: string;
+}
+
+export interface Conversation {
+  id: string;
+  title: string;
+  messages: ChatMessage[];
+  unrestricted: boolean;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface CalendarEvent {
@@ -105,6 +114,10 @@ export interface Task {
   // Deadline support (from calendar deadline events)
   dueDate?: string; // ISO string
   linkedEventId?: string;
+  // Pomodoro linking — estimated focus sessions and how many have elapsed
+  // while this task was the active focus target.
+  estimatedSessions?: number;
+  completedSessions?: number;
 }
 
 // ─── Flashcard Types ────────────────────────────────────────────────────────
@@ -140,6 +153,19 @@ export interface FocusSession {
   sessions: number;    // pomodoro sessions completed
 }
 
+// ─── PDF Library Types ───────────────────────────────────────────────────────
+
+export interface LibraryDoc {
+  id: string;
+  title: string;          // from PDF metadata, falls back to filename
+  author?: string;
+  pageCount?: number;
+  fileName: string;       // original display filename (e.g. "thesis.pdf")
+  sizeBytes?: number;
+  addedAt: string;        // ISO
+  // The file itself is copied to <appData>/library/<id>.pdf on import.
+}
+
 // ─── Store ───────────────────────────────────────────────────────────────────
 
 interface AppState {
@@ -156,6 +182,16 @@ interface AppState {
   aiVendorConfigs: Record<AIVendor, AIVendorConfig>;
   setAIVendor: (v: AIVendor) => void;
   setAIVendorConfig: (v: AIVendor, patch: Partial<AIVendorConfig>) => void;
+
+  // AI privacy / opt-in — when false, all AI features are hidden/disabled
+  aiEnabled: boolean;
+  setAiEnabled: (v: boolean) => void;
+  // Feed the user's notes + library into the assistant as context
+  aiUseStudyContext: boolean;
+  setAiUseStudyContext: (v: boolean) => void;
+  // Let the assistant act on the app (create tasks, flashcards, events, …)
+  agentMode: boolean;
+  setAgentMode: (v: boolean) => void;
 
   setActiveModule: (m: Module) => void;
   setApiKey: (key: string) => void;
@@ -182,9 +218,18 @@ interface AppState {
   longBreakDuration: number;
   sessionsUntilLongBreak: number;
   goal: string;
+  // AI conversation memory — multiple named, persisted threads. `chatMessages`
+  // is a live mirror of the active conversation's messages so the chat UI can
+  // read it directly; conversation actions keep both in sync.
+  conversations: Conversation[];
+  activeConversationId: string | null;
   chatMessages: ChatMessage[];
   isChatLoading: boolean;
   _intervalId: ReturnType<typeof setInterval> | null;
+  // Absolute wall-clock deadline (epoch ms) for the running timer. Source of
+  // truth while running — makes the countdown immune to re-renders, store
+  // writes (e.g. a cloud sync) and app restarts.
+  timerEndsAt: number | null;
 
   // Weekly goal
   weeklyGoalHours: number;
@@ -205,6 +250,13 @@ interface AppState {
   addChatMessage: (msg: ChatMessage) => void;
   setChatLoading: (v: boolean) => void;
   clearChat: () => void;
+  // Conversation memory actions
+  newConversation: () => void;
+  switchConversation: (id: string) => void;
+  deleteConversation: (id: string) => void;
+  renameConversation: (id: string, title: string) => void;
+  setConversationUnrestricted: (v: boolean) => void;
+  wipeAllAIData: () => void;
 
   // ── Calendar ──────────────────────────────────────────────────────────────
   calendarEvents: CalendarEvent[];
@@ -226,8 +278,12 @@ interface AppState {
   // ── Notes ─────────────────────────────────────────────────────────────────
   notes: NoteFile[];
   activeNoteId: string | null;
+  openNoteIds: string[]; // notes open as tabs, in tab order
+  closeNoteTab: (id: string) => void;
   isVimMode: boolean;
   showNotepadPdf: boolean;
+  expandedFolderIds: string[]; // persisted folder tree open/closed state
+  setFolderExpanded: (id: string, open: boolean) => void;
   notePdfUrl: string | null;
   notePdfFileName: string;
   setNotePdf: (url: string | null, fileName: string) => void;
@@ -251,7 +307,16 @@ interface AppState {
   editTask: (id: string, text: string) => void;
   reorderTasks: (from: number, to: number) => void;
   clearCompletedTasks: () => void;
+  clearAllTasks: () => void; // Clears all non-deadline-linked tasks
   syncDeadlineTasks: () => void; // Pulls deadline events into task list
+
+  // ── Pomodoro ↔ Tasks linking ───────────────────────────────────────────────
+  activeTaskId: string | null;            // task currently linked to the timer
+  taskFinishPrompt: string | null;        // task id awaiting "is it finished?" prompt
+  setActivePomodoroTask: (id: string | null) => void;
+  setTaskEstimate: (id: string, sessions: number) => void;
+  setTaskFinishPrompt: (id: string | null) => void;
+  onWorkSessionComplete: (wasWork: boolean) => void; // called by the timer on each finished session
 
   // ── Flashcards ────────────────────────────────────────────────────────────
   flashcardDecks: FlashcardDeck[];
@@ -268,6 +333,12 @@ interface AppState {
   // ── Focus Stats ───────────────────────────────────────────────────────────
   focusSessions: FocusSession[];
   recordFocusTime: (seconds: number) => void;
+
+  // ── PDF Library ─────────────────────────────────────────────────────────────
+  libraryDocs: LibraryDoc[];
+  addLibraryDoc: (doc: LibraryDoc) => void;
+  removeLibraryDoc: (id: string) => void;
+  updateLibraryDoc: (id: string, patch: Partial<LibraryDoc>) => void;
 
   // ── Cloud Sync (persisted) ─────────────────────────────────────────────────
   syncFolder: string | null;
@@ -329,6 +400,7 @@ export const useStore = create<AppState>()(
         groq:      { apiKey: "", model: "llama-3.3-70b-versatile" },
         openai:    { apiKey: "", model: "gpt-4o-mini" },
         anthropic: { apiKey: "", model: "claude-haiku-4-5-20251001" },
+        deepseek:  { apiKey: "", model: "deepseek-chat" },
         ollama:    { apiKey: "", model: "llama3.2", baseUrl: "http://localhost:11434" },
       },
       setAIVendor: (aiVendor) => set({ aiVendor }),
@@ -339,6 +411,15 @@ export const useStore = create<AppState>()(
             [vendor]: { ...s.aiVendorConfigs[vendor], ...patch },
           },
         })),
+
+      // Privacy-first: AI is opt-in. The v5 migration flips this on for existing
+      // users who already configured a key or have chat history.
+      aiEnabled: false,
+      setAiEnabled: (aiEnabled) => set({ aiEnabled }),
+      aiUseStudyContext: false,
+      setAiUseStudyContext: (aiUseStudyContext) => set({ aiUseStudyContext }),
+      agentMode: false,
+      setAgentMode: (agentMode) => set({ agentMode }),
 
       setActiveModule: (activeModule) => set({ activeModule }),
       setApiKey: (apiKey) =>
@@ -379,9 +460,12 @@ export const useStore = create<AppState>()(
       longBreakDuration: 15,
       sessionsUntilLongBreak: 4,
       goal: "",
+      conversations: [],
+      activeConversationId: null,
       chatMessages: [],
       isChatLoading: false,
       _intervalId: null,
+      timerEndsAt: null,
 
       weeklyGoalHours: 20,
       setWeeklyGoalHours: (weeklyGoalHours) => set({ weeklyGoalHours }),
@@ -390,6 +474,8 @@ export const useStore = create<AppState>()(
         const state = get();
         if (state.isRunning) return;
 
+        const endsAt = Date.now() + state.timeLeft * 1000;
+
         const id = setInterval(() => {
           const s = get();
           if (!s.isRunning) {
@@ -397,7 +483,13 @@ export const useStore = create<AppState>()(
             return;
           }
 
-          if (s.timeLeft <= 1) {
+          // Derive remaining time from the absolute deadline rather than
+          // blind decrement, so a stray set() (cloud sync, re-render) can never
+          // shorten or reset the timer — the next tick self-corrects.
+          const deadline = s.timerEndsAt ?? Date.now();
+          const remaining = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+
+          if (remaining <= 0) {
             clearInterval(id);
 
             // Record focus time
@@ -425,6 +517,7 @@ export const useStore = create<AppState>()(
             set({
               isRunning: false,
               _intervalId: null,
+              timerEndsAt: null,
               pomodoroMode: nextMode,
               sessionsCompleted: sessions,
               timeLeft:
@@ -434,18 +527,23 @@ export const useStore = create<AppState>()(
                   ? s.breakDuration * 60
                   : s.longBreakDuration * 60,
             });
+
+            get().onWorkSessionComplete(s.pomodoroMode === "work");
           } else {
-            set({ timeLeft: s.timeLeft - 1 });
+            set({ timeLeft: remaining });
           }
         }, 1000);
 
-        set({ isRunning: true, _intervalId: id });
+        set({ isRunning: true, _intervalId: id, timerEndsAt: endsAt });
       },
 
       pauseTimer: () => {
-        const { _intervalId } = get();
+        const { _intervalId, timerEndsAt, timeLeft } = get();
         if (_intervalId) clearInterval(_intervalId);
-        set({ isRunning: false, _intervalId: null });
+        const remaining = timerEndsAt
+          ? Math.max(0, Math.ceil((timerEndsAt - Date.now()) / 1000))
+          : timeLeft;
+        set({ isRunning: false, _intervalId: null, timerEndsAt: null, timeLeft: remaining });
       },
 
       resetTimer: () => {
@@ -457,7 +555,7 @@ export const useStore = create<AppState>()(
             : pomodoroMode === "break"
             ? breakDuration * 60
             : longBreakDuration * 60;
-        set({ isRunning: false, _intervalId: null, timeLeft: total });
+        set({ isRunning: false, _intervalId: null, timerEndsAt: null, timeLeft: total });
       },
 
       skipSession: () => {
@@ -478,6 +576,7 @@ export const useStore = create<AppState>()(
         set({
           isRunning: false,
           _intervalId: null,
+          timerEndsAt: null,
           pomodoroMode: nextMode,
           sessionsCompleted: sessions,
           timeLeft:
@@ -496,6 +595,7 @@ export const useStore = create<AppState>()(
           pomodoroMode: mode,
           isRunning: false,
           _intervalId: null,
+          timerEndsAt: null,
           timeLeft:
             mode === "work"
               ? workDuration * 60
@@ -520,6 +620,7 @@ export const useStore = create<AppState>()(
           sessionsUntilLongBreak: sessionsUntilLongBreak ?? s.sessionsUntilLongBreak,
           isRunning: false,
           _intervalId: null,
+          timerEndsAt: null,
           timeLeft:
             s.pomodoroMode === "work"
               ? wd * 60
@@ -530,9 +631,112 @@ export const useStore = create<AppState>()(
       },
 
       addChatMessage: (msg) =>
-        set((s) => ({ chatMessages: [...s.chatMessages, msg] })),
+        set((s) => {
+          const now = new Date().toISOString();
+          // Ensure there is an active conversation to append to.
+          let conversations = s.conversations;
+          let activeId = s.activeConversationId;
+          if (!activeId || !conversations.some((c) => c.id === activeId)) {
+            const fresh: Conversation = {
+              id: uid(),
+              title: "New chat",
+              messages: [],
+              unrestricted: false,
+              createdAt: now,
+              updatedAt: now,
+            };
+            conversations = [fresh, ...conversations];
+            activeId = fresh.id;
+          }
+          const messages = [
+            ...(conversations.find((c) => c.id === activeId)?.messages ?? []),
+            msg,
+          ];
+          conversations = conversations.map((c) =>
+            c.id === activeId
+              ? {
+                  ...c,
+                  messages,
+                  updatedAt: now,
+                  // Title from the first user message of an untitled thread.
+                  title:
+                    c.title === "New chat" && msg.role === "user"
+                      ? msg.content.replace(/\s+/g, " ").trim().slice(0, 40) || "New chat"
+                      : c.title,
+                }
+              : c
+          );
+          return { conversations, activeConversationId: activeId, chatMessages: messages };
+        }),
       setChatLoading: (isChatLoading) => set({ isChatLoading }),
-      clearChat: () => set({ chatMessages: [] }),
+      clearChat: () =>
+        set((s) => {
+          const activeId = s.activeConversationId;
+          if (!activeId) return { chatMessages: [] };
+          return {
+            chatMessages: [],
+            conversations: s.conversations.map((c) =>
+              c.id === activeId
+                ? { ...c, messages: [], title: "New chat", updatedAt: new Date().toISOString() }
+                : c
+            ),
+          };
+        }),
+
+      newConversation: () =>
+        set((s) => {
+          const now = new Date().toISOString();
+          const fresh: Conversation = {
+            id: uid(),
+            title: "New chat",
+            messages: [],
+            unrestricted: false,
+            createdAt: now,
+            updatedAt: now,
+          };
+          return {
+            conversations: [fresh, ...s.conversations],
+            activeConversationId: fresh.id,
+            chatMessages: [],
+          };
+        }),
+      switchConversation: (id) =>
+        set((s) => {
+          const conv = s.conversations.find((c) => c.id === id);
+          if (!conv) return {};
+          return { activeConversationId: id, chatMessages: conv.messages };
+        }),
+      deleteConversation: (id) =>
+        set((s) => {
+          const remaining = s.conversations.filter((c) => c.id !== id);
+          if (s.activeConversationId !== id) {
+            return { conversations: remaining };
+          }
+          const next = remaining[0] ?? null;
+          return {
+            conversations: remaining,
+            activeConversationId: next?.id ?? null,
+            chatMessages: next?.messages ?? [],
+          };
+        }),
+      renameConversation: (id, title) =>
+        set((s) => ({
+          conversations: s.conversations.map((c) =>
+            c.id === id ? { ...c, title: title.trim() || c.title } : c
+          ),
+        })),
+      setConversationUnrestricted: (v) =>
+        set((s) => {
+          const activeId = s.activeConversationId;
+          if (!activeId) return {};
+          return {
+            conversations: s.conversations.map((c) =>
+              c.id === activeId ? { ...c, unrestricted: v } : c
+            ),
+          };
+        }),
+      wipeAllAIData: () =>
+        set({ conversations: [], activeConversationId: null, chatMessages: [], isChatLoading: false }),
 
       // ── Calendar ────────────────────────────────────────────────────────
       calendarEvents: [],
@@ -599,8 +803,16 @@ export const useStore = create<AppState>()(
         },
       ],
       activeNoteId: "welcome",
+      openNoteIds: ["welcome"],
       isVimMode: false,
       showNotepadPdf: false,
+      expandedFolderIds: [],
+      setFolderExpanded: (id, open) =>
+        set((s) => ({
+          expandedFolderIds: open
+            ? Array.from(new Set([...s.expandedFolderIds, id]))
+            : s.expandedFolderIds.filter((f) => f !== id),
+        })),
 
       addNote: (parentId = null) => {
         const id = uid();
@@ -619,6 +831,7 @@ export const useStore = create<AppState>()(
             },
           ],
           activeNoteId: id,
+          openNoteIds: [...s.openNoteIds, id],
           hasPendingChanges: s.syncEnabled ? true : s.hasPendingChanges,
         }));
         return id;
@@ -661,12 +874,21 @@ export const useStore = create<AppState>()(
               .forEach((n) => collectIds(n.id));
           };
           collectIds(id);
+
+          // Prune closed/deleted notes from the open tabs.
+          const openNoteIds = s.openNoteIds.filter((t) => !toDelete.has(t));
+          // If the active note was deleted, fall back to a neighbouring tab.
+          let activeNoteId = s.activeNoteId;
+          if (activeNoteId && toDelete.has(activeNoteId)) {
+            const prevIdx = s.openNoteIds.indexOf(activeNoteId);
+            activeNoteId =
+              openNoteIds[prevIdx] ?? openNoteIds[prevIdx - 1] ?? openNoteIds[openNoteIds.length - 1] ?? null;
+          }
+
           return {
             notes: s.notes.filter((n) => !toDelete.has(n.id)),
-            activeNoteId:
-              s.activeNoteId && toDelete.has(s.activeNoteId)
-                ? null
-                : s.activeNoteId,
+            openNoteIds,
+            activeNoteId,
           };
         }),
       moveNote: (id, newParentId) =>
@@ -676,7 +898,32 @@ export const useStore = create<AppState>()(
           ),
           hasPendingChanges: s.syncEnabled ? true : s.hasPendingChanges,
         })),
-      setActiveNote: (activeNoteId) => set({ activeNoteId }),
+      setActiveNote: (id) =>
+        set((s) => {
+          if (id == null) return { activeNoteId: null };
+          // Open a tab for real notes (folders are never tabs).
+          const isNote = s.notes.some((n) => n.id === id && !n.isFolder);
+          return {
+            activeNoteId: id,
+            openNoteIds:
+              isNote && !s.openNoteIds.includes(id)
+                ? [...s.openNoteIds, id]
+                : s.openNoteIds,
+          };
+        }),
+      closeNoteTab: (id) =>
+        set((s) => {
+          const openNoteIds = s.openNoteIds.filter((t) => t !== id);
+          let activeNoteId = s.activeNoteId;
+          if (activeNoteId === id) {
+            const prevIdx = s.openNoteIds.indexOf(id);
+            activeNoteId =
+              openNoteIds[prevIdx] ?? openNoteIds[prevIdx - 1] ?? openNoteIds[openNoteIds.length - 1] ?? null;
+          }
+          // NOTE: deliberately does not touch expandedFolderIds — closing a tab
+          // must never collapse folders the user has opened in the tree.
+          return { openNoteIds, activeNoteId };
+        }),
       toggleVimMode: () => set((s) => ({ isVimMode: !s.isVimMode })),
       toggleNotepadPdf: () => set((s) => ({ showNotepadPdf: !s.showNotepadPdf })),
 
@@ -763,7 +1010,11 @@ export const useStore = create<AppState>()(
         if (task?.completed) playSound(get().soundType, get().soundVolume * 0.7);
       },
       deleteTask: (id) =>
-        set((s) => ({ tasks: s.tasks.filter((t) => t.id !== id) })),
+        set((s) => ({
+          tasks: s.tasks.filter((t) => t.id !== id),
+          activeTaskId: s.activeTaskId === id ? null : s.activeTaskId,
+          taskFinishPrompt: s.taskFinishPrompt === id ? null : s.taskFinishPrompt,
+        })),
       editTask: (id, text) =>
         set((s) => ({
           tasks: s.tasks.map((t) => (t.id === id ? { ...t, text } : t)),
@@ -777,6 +1028,48 @@ export const useStore = create<AppState>()(
         }),
       clearCompletedTasks: () =>
         set((s) => ({ tasks: s.tasks.filter((t) => !t.completed) })),
+      clearAllTasks: () =>
+        set((s) => ({
+          // Keep deadline-linked tasks — those are owned by the calendar.
+          tasks: s.tasks.filter((t) => !!t.linkedEventId),
+          activeTaskId: null,
+          taskFinishPrompt: null,
+        })),
+
+      // ── Pomodoro ↔ Tasks linking ──────────────────────────────────────────
+      activeTaskId: null,
+      taskFinishPrompt: null,
+      setActivePomodoroTask: (activeTaskId) => set({ activeTaskId }),
+      setTaskEstimate: (id, sessions) =>
+        set((s) => ({
+          tasks: s.tasks.map((t) =>
+            t.id === id
+              ? { ...t, estimatedSessions: sessions > 0 ? sessions : undefined }
+              : t
+          ),
+        })),
+      setTaskFinishPrompt: (taskFinishPrompt) => set({ taskFinishPrompt }),
+      onWorkSessionComplete: (wasWork) => {
+        if (!wasWork) return;
+        const s = get();
+        const id = s.activeTaskId;
+        if (!id) return;
+        const task = s.tasks.find((t) => t.id === id);
+        if (!task || task.completed) return;
+
+        const completed = (task.completedSessions ?? 0) + 1;
+        set((st) => ({
+          tasks: st.tasks.map((t) =>
+            t.id === id ? { ...t, completedSessions: completed } : t
+          ),
+        }));
+
+        // Prompt exactly once, when the estimate is first reached. If the user
+        // keeps going past it, they won't be nagged again.
+        if (task.estimatedSessions && completed === task.estimatedSessions) {
+          set({ taskFinishPrompt: id });
+        }
+      },
 
       syncDeadlineTasks: () => {
         const s = get();
@@ -953,6 +1246,17 @@ export const useStore = create<AppState>()(
         });
       },
 
+      // ── PDF Library ────────────────────────────────────────────────────────
+      libraryDocs: [],
+      addLibraryDoc: (doc) =>
+        set((s) => ({ libraryDocs: [doc, ...s.libraryDocs] })),
+      removeLibraryDoc: (id) =>
+        set((s) => ({ libraryDocs: s.libraryDocs.filter((d) => d.id !== id) })),
+      updateLibraryDoc: (id, patch) =>
+        set((s) => ({
+          libraryDocs: s.libraryDocs.map((d) => (d.id === id ? { ...d, ...patch } : d)),
+        })),
+
       // ── Cloud Sync ───────────────────────────────────────────────────────
       syncFolder: null,
       syncEnabled: false,
@@ -989,7 +1293,7 @@ export const useStore = create<AppState>()(
     }),
     {
       name: "hades-store",
-      version: 3,
+      version: 5,
       migrate: (persisted: any, version) => {
         if (!persisted) return persisted;
         if (version < 2) {
@@ -1010,12 +1314,64 @@ export const useStore = create<AppState>()(
           if (!("syncEnabled" in persisted)) persisted.syncEnabled = false;
           if (!("lastSyncAt"  in persisted)) persisted.lastSyncAt  = null;
         }
+        if (version < 4) {
+          // Seed note tabs from the previously-active note so existing users
+          // don't open to an empty tab strip.
+          if (!Array.isArray(persisted.openNoteIds)) {
+            persisted.openNoteIds = persisted.activeNoteId ? [persisted.activeNoteId] : [];
+          }
+          if (!Array.isArray(persisted.libraryDocs)) persisted.libraryDocs = [];
+        }
+        if (version < 5) {
+          // New DeepSeek vendor config.
+          if (persisted.aiVendorConfigs && !persisted.aiVendorConfigs.deepseek) {
+            persisted.aiVendorConfigs.deepseek = { apiKey: "", model: "deepseek-chat" };
+          }
+          // Wrap the legacy single thread into the new conversation model.
+          if (!Array.isArray(persisted.conversations)) {
+            const legacy: ChatMessage[] = Array.isArray(persisted.chatMessages)
+              ? persisted.chatMessages
+              : [];
+            if (legacy.length > 0) {
+              const now = new Date().toISOString();
+              const firstUser = legacy.find((m) => m.role === "user");
+              const conv = {
+                id: Math.random().toString(36).slice(2, 10) + Date.now().toString(36),
+                title:
+                  firstUser?.content.replace(/\s+/g, " ").trim().slice(0, 40) || "Previous chat",
+                messages: legacy,
+                unrestricted: false,
+                createdAt: now,
+                updatedAt: now,
+              };
+              persisted.conversations = [conv];
+              persisted.activeConversationId = conv.id;
+            } else {
+              persisted.conversations = [];
+              persisted.activeConversationId = null;
+            }
+          }
+          // Privacy opt-in: don't regress users who already use AI.
+          if (!("aiEnabled" in persisted)) {
+            const cfgs = persisted.aiVendorConfigs ?? {};
+            const hasKey = Object.values(cfgs).some(
+              (c: any) => typeof c?.apiKey === "string" && c.apiKey.trim().length > 0
+            );
+            const hasHistory =
+              (Array.isArray(persisted.conversations) && persisted.conversations.length > 0) ||
+              (Array.isArray(persisted.chatMessages) && persisted.chatMessages.length > 0);
+            persisted.aiEnabled = hasKey || hasHistory;
+          }
+          if (!("aiUseStudyContext" in persisted)) persisted.aiUseStudyContext = false;
+        }
         return persisted;
       },
       partialize: (s) => ({
         ...s,
         isRunning: false,
         _intervalId: null,
+        timerEndsAt: null,
+        taskFinishPrompt: null,
         isChatLoading: false,
         notePdfUrl: null,
         notePdfFileName: "",

@@ -19,6 +19,9 @@
   /* ─── Zinc Dark (default) ───────────────────────────────────────── */
   :root,
   [data-theme="dark"] {
+    /* Default scheme for all themes; light themes override below. Drives the
+       native widgets (date pickers, scrollbars) so they match the app theme. */
+    color-scheme: dark;
     --color-surface: #09090b;
     --color-surface-hover: rgba(39, 39, 42, 0.6);
     --color-surface-elevated: #18181b;
@@ -48,6 +51,7 @@
 
   /* ─── Paper (light) ─────────────────────────────────────────────── */
   [data-theme="light"] {
+    color-scheme: light;
     --color-surface: #faf8f1;
     --color-surface-hover: rgba(245, 240, 225, 0.8);
     --color-surface-elevated: #f5f0e0;
@@ -338,6 +342,7 @@
 
   /* ─── Solarized Light ───────────────────────────────────────────── */
   [data-theme="solarized-light"] {
+    color-scheme: light;
     --color-surface: #fdf6e3;
     --color-surface-hover: rgba(238, 232, 213, 0.8);
     --color-surface-elevated: #eee8d5;
@@ -396,6 +401,7 @@
 
   /* ─── Rosé Pine Dawn (light) ────────────────────────────────────── */
   [data-theme="rosepine-dawn"] {
+    color-scheme: light;
     --color-surface: #faf4ed;
     --color-surface-hover: rgba(244, 237, 226, 0.85);
     --color-surface-elevated: #fffaf3;

@@ -25,12 +25,15 @@ import {
 } from "@codemirror/language";
 import { tags } from "@lezer/highlight";
 import { vim } from "@replit/codemirror-vim";
+import "katex/dist/katex.min.css";
 import { useStore } from "../../store/useStore";
 import {
   markdownLiveDecorations,
   markdownFoldService,
   listBindings,
 } from "../../lib/markdownDecorations";
+import { mathLiveDecorations } from "../../lib/mathDecorations";
+import { registerEditorInsert } from "../../lib/editorBridge";
 
 interface Props {
   noteId: string;
@@ -208,6 +211,8 @@ export default function Editor({ noteId, content, onChange }: Props) {
 
           // Live-preview decorations (conceal markers, bullets, headings, etc.)
           markdownLiveDecorations,
+          // Live KaTeX rendering of $…$ / $$…$$
+          mathLiveDecorations,
 
           // Line numbers
           lineNumbers(),
@@ -237,6 +242,18 @@ export default function Editor({ noteId, content, onChange }: Props) {
       const view = new EditorView({ state, parent: editorRef.current });
       viewRef.current = view;
 
+      // Let other components (e.g. the Calculator) insert at the cursor.
+      registerEditorInsert((text: string) => {
+        const sel = view.state.selection.main;
+        view.dispatch({
+          changes: { from: sel.from, to: sel.to, insert: text },
+          selection: { anchor: sel.from + text.length },
+          scrollIntoView: true,
+        });
+        view.focus();
+        return true;
+      });
+
       // Focus the editor on mount
       setTimeout(() => view.focus(), 0);
     } catch (err) {
@@ -244,6 +261,7 @@ export default function Editor({ noteId, content, onChange }: Props) {
     }
 
     return () => {
+      registerEditorInsert(null);
       viewRef.current?.destroy();
       viewRef.current = null;
     };

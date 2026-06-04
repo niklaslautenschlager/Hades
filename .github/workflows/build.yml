@@ -70,6 +70,11 @@ jobs:
           - name: macOS (universal)
             os: macos-latest
             tauri-args: '--target universal-apple-darwin'
+            # Ad-hoc codesign so the universal .app launches on Apple Silicon
+            # AND Intel without the "cannot be opened / is damaged" Gatekeeper
+            # error that unsigned downloaded bundles hit. Users still clear the
+            # download quarantine once (see README troubleshooting).
+            apple-signing-identity: '-'
           - name: Windows
             os: windows-latest
             tauri-args: ''
@@ -109,6 +114,8 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Only set on macOS (empty elsewhere; ignored on Linux/Windows).
+          APPLE_SIGNING_IDENTITY: ${{ matrix.apple-signing-identity }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: Hades ${{ github.ref_name }}

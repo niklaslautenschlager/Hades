@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { Upload, X, FileText, Link as LinkIcon, Loader2 } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { invoke } from "@tauri-apps/api/core";
 import { readFile } from "@tauri-apps/plugin-fs";
 import { useShallow } from "zustand/react/shallow";
 import { useStore } from "../../store/useStore";
@@ -72,15 +73,17 @@ export default function PdfViewer({ onClose }: Props) {
     setLoadingUrl(true);
     setUrlError("");
     try {
-      const response = await fetch(url);
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const blob = await response.blob();
+      // The fetch runs natively in Rust (see fetch_pdf), bypassing the webview's
+      // CORS policy and the http capability scope, following redirects, and
+      // validating the payload is really a PDF before we try to render it.
+      const bytes = await invoke<ArrayBuffer>("fetch_pdf", { url });
+      const blob = new Blob([bytes], { type: "application/pdf" });
       const name = url.split("/").pop()?.split("?")[0] || "document.pdf";
       loadFromBlob(blob, name);
       setUrlInput("");
       setShowUrlInput(false);
     } catch (err) {
-      setUrlError(String(err));
+      setUrlError(err instanceof Error ? err.message : String(err));
     } finally {
       setLoadingUrl(false);
     }

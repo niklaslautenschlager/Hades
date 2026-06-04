@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo } from "react";
-import { Send, Bot, User, Loader2, Trash2, AlertCircle, Zap } from "lucide-react";
+import { Send, Bot, User, Loader2, Trash2, AlertCircle, Zap, Plus, MessageSquare, ChevronDown, Sparkles } from "lucide-react";
 import { marked } from "marked";
 import { motion, AnimatePresence } from "framer-motion";
 import { useShallow } from "zustand/react/shallow";
@@ -11,9 +11,20 @@ import {
   COMMANDS,
   AI_MODELS,
   VENDOR_LABELS,
+  APP_CONTEXT,
+  DEEP_RESEARCH_COMMAND,
   type Command,
 } from "../../lib/ai";
+import { retrieveContext } from "../../lib/aiContext";
+import {
+  buildAgentSystemPrompt,
+  parseToolCalls,
+  stripToolBlocks,
+  executeToolCalls,
+} from "../../lib/aiTools";
 import type { AIVendor } from "../../store/useStore";
+
+const MAX_AGENT_ROUNDS = 4;
 
 marked.setOptions({ breaks: true, gfm: true });
 
@@ -35,9 +46,18 @@ export default function AIAssistant({ goal }: Props) {
     isChatLoading,
     aiVendor,
     aiVendorConfigs,
+    aiEnabled,
+    aiUseStudyContext,
+    agentMode,
+    conversations,
+    activeConversationId,
     addChatMessage,
     setChatLoading,
     clearChat,
+    newConversation,
+    switchConversation,
+    deleteConversation,
+    setConversationUnrestricted,
     setGoal,
     startTimer,
     pauseTimer,
@@ -52,9 +72,18 @@ export default function AIAssistant({ goal }: Props) {
       isChatLoading: s.isChatLoading,
       aiVendor: s.aiVendor,
       aiVendorConfigs: s.aiVendorConfigs,
+      aiEnabled: s.aiEnabled,
+      aiUseStudyContext: s.aiUseStudyContext,
+      agentMode: s.agentMode,
+      conversations: s.conversations,
+      activeConversationId: s.activeConversationId,
       addChatMessage: s.addChatMessage,
       setChatLoading: s.setChatLoading,
       clearChat: s.clearChat,
+      newConversation: s.newConversation,
+      switchConversation: s.switchConversation,
+      deleteConversation: s.deleteConversation,
+      setConversationUnrestricted: s.setConversationUnrestricted,
       setGoal: s.setGoal,
       startTimer: s.startTimer,
       pauseTimer: s.pauseTimer,
@@ -68,11 +97,16 @@ export default function AIAssistant({ goal }: Props) {
 
   const activeConfig = aiVendorConfigs[aiVendor];
   const availableModels = AI_MODELS[aiVendor];
+  // Unrestricted mode is a property of the active conversation so it persists
+  // and is restored when switching threads.
+  const activeConv = conversations.find((c) => c.id === activeConversationId);
+  const unrestricted = activeConv?.unrestricted ?? false;
+  const setUnrestricted = setConversationUnrestricted;
 
   const [input, setInput] = useState("");
   const [streamingContent, setStreamingContent] = useState("");
   const [error, setError] = useState("");
-  const [unrestricted, setUnrestricted] = useState(false);
+  const [showConversations, setShowConversations] = useState(false);
   const [selectedHint, setSelectedHint] = useState(0);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -93,14 +127,14 @@ export default function AIAssistant({ goal }: Props) {
   function handleLocalCommand(cmd: Command, arg: string): boolean {
     switch (cmd.name) {
       case "/I-want-to-waste-my-time":
-        setUnrestricted(true);
         addChatMessage({ role: "user", content: cmd.name });
+        setUnrestricted(true);
         addChatMessage({ role: "assistant", content: "Unrestricted mode activated. I can now talk about anything. What's on your mind?" });
         return true;
 
       case "/back-to-studying":
-        setUnrestricted(false);
         addChatMessage({ role: "user", content: cmd.name });
+        setUnrestricted(false);
         addChatMessage({ role: "assistant", content: "Study mode re-engaged. Let's get back to work. What are you studying?" });
         return true;
 
@@ -138,7 +172,7 @@ export default function AIAssistant({ goal }: Props) {
 
       case "/vendor": {
         const argLower = arg.toLowerCase().trim();
-        const validVendors: AIVendor[] = ["groq", "openai", "anthropic", "ollama"];
+        const validVendors: AIVendor[] = ["groq", "openai", "anthropic", "deepseek", "ollama"];
         const target = validVendors.find((v) => v === argLower);
         if (target) {
           setAIVendor(target);
@@ -207,6 +241,89 @@ export default function AIAssistant({ goal }: Props) {
 
   // ─── Send handler ───────────────────────────────────────────────────────
 
+  // One streamed turn. Streams deltas to the UI; resolves with the full text.
+  function streamOnce(
+    messages: { role: "user" | "assistant"; content: string }[],
+    extra: { deepResearch?: boolean; agentSystem?: string; studyContext?: string },
+  ): Promise<string> {
+    return new Promise((resolve, reject) => {
+      let acc = "";
+      streamChatResponse(
+        {
+          vendor: aiVendor,
+          apiKey: activeConfig.apiKey,
+          model: activeConfig.model,
+          baseUrl: activeConfig.baseUrl,
+          messages,
+          unrestricted,
+          appContext: APP_CONTEXT,
+          studyContext: extra.studyContext,
+          deepResearch: extra.deepResearch,
+          agentSystem: extra.agentSystem,
+          maxTokens: extra.deepResearch ? 4096 : extra.agentSystem ? 2048 : undefined,
+        },
+        (delta) => { acc += delta; setStreamingContent(acc); },
+        () => resolve(acc),
+        (err) => reject(new Error(err)),
+      );
+    });
+  }
+
+  async function runAI(
+    allMessages: { role: "user" | "assistant"; content: string }[],
+    opts: { deepResearch?: boolean; query?: string } = {}
+  ) {
+    setStreamingContent("");
+    setChatLoading(true);
+    setError("");
+
+    const agent = agentMode && !opts.deepResearch;
+    // In agent mode the model retrieves notes itself via search_notes; otherwise
+    // inject retrieved study context up front when enabled.
+    const studyContext =
+      !agent && aiUseStudyContext && opts.query ? (await retrieveContext(opts.query)) || undefined : undefined;
+    const agentSystem = agent ? buildAgentSystemPrompt() : undefined;
+
+    try {
+      let messages = [...allMessages];
+      for (let round = 0; ; round++) {
+        const text = await streamOnce(messages, { deepResearch: opts.deepResearch, agentSystem, studyContext });
+        setStreamingContent("");
+
+        if (!agent) {
+          addChatMessage({ role: "assistant", content: text });
+          break;
+        }
+
+        const calls = parseToolCalls(text);
+        const visible = stripToolBlocks(text);
+
+        if (calls.length === 0) {
+          addChatMessage({ role: "assistant", content: visible || text });
+          break;
+        }
+
+        const outcomes = await executeToolCalls(calls);
+        const chips = outcomes.map((o) => `${o.ok ? "✓" : "✗"} ${o.summary}`).join("\n");
+        addChatMessage({ role: "assistant", content: visible ? `${visible}\n\n${chips}` : chips });
+
+        if (round >= MAX_AGENT_ROUNDS - 1) break;
+
+        const obs = outcomes.map((o, i) => `[${i + 1}] ${o.tool}: ${o.observation}`).join("\n\n");
+        messages = [
+          ...messages,
+          { role: "assistant", content: text },
+          { role: "user", content: `Observations:\n${obs}\n\nContinue if more steps are needed, otherwise give your final answer.` },
+        ];
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setStreamingContent("");
+      setChatLoading(false);
+    }
+  }
+
   async function handleSend() {
     const text = input.trim();
     if (!text || isChatLoading) return;
@@ -226,28 +343,9 @@ export default function AIAssistant({ goal }: Props) {
       if (match.command.type === "ai" && match.command.aiPrompt) {
         const injected = match.command.aiPrompt.replace("{arg}", match.arg);
         addChatMessage({ role: "user", content: text });
-
-        const allMessages = [
-          ...chatMessages,
-          { role: "user" as const, content: injected },
-        ];
-
-        setStreamingContent("");
-        setChatLoading(true);
-        let accumulated = "";
-
-        await streamChatResponse(
-          {
-            vendor: aiVendor,
-            apiKey: activeConfig.apiKey,
-            model: activeConfig.model,
-            baseUrl: activeConfig.baseUrl,
-            messages: allMessages,
-            unrestricted,
-          },
-          (delta) => { accumulated += delta; setStreamingContent(accumulated); },
-          () => { addChatMessage({ role: "assistant", content: accumulated }); setStreamingContent(""); setChatLoading(false); },
-          (err) => { setError(err); setStreamingContent(""); setChatLoading(false); },
+        await runAI(
+          [...chatMessages, { role: "user", content: injected }],
+          { deepResearch: match.command.name === DEEP_RESEARCH_COMMAND, query: match.arg || injected }
         );
         return;
       }
@@ -255,31 +353,7 @@ export default function AIAssistant({ goal }: Props) {
 
     // Regular message
     addChatMessage({ role: "user", content: text });
-    const allMessages = [...chatMessages, { role: "user" as const, content: text }];
-
-    setStreamingContent("");
-    setChatLoading(true);
-    let accumulated = "";
-
-    await streamChatResponse(
-      {
-        vendor: aiVendor,
-        apiKey: activeConfig.apiKey,
-        model: activeConfig.model,
-        baseUrl: activeConfig.baseUrl,
-        messages: allMessages,
-        unrestricted,
-      },
-      (delta) => { accumulated += delta; setStreamingContent(accumulated); },
-      () => { addChatMessage({ role: "assistant", content: accumulated }); setStreamingContent(""); setChatLoading(false); },
-      (err) => { setError(err); setStreamingContent(""); setChatLoading(false); },
-    );
-  }
-
-  function handleClear() {
-    clearChat();
-    setUnrestricted(false);
-    setError("");
+    await runAI([...chatMessages, { role: "user", content: text }], { query: text });
   }
 
   function handleKeyDown(e: React.KeyboardEvent) {
@@ -309,6 +383,23 @@ export default function AIAssistant({ goal }: Props) {
     }
   }
 
+  // Privacy opt-in: when AI is disabled, show nothing but a gentle pointer.
+  if (!aiEnabled) {
+    return (
+      <div className="flex flex-col flex-1 min-w-0 min-h-0 items-center justify-center text-center px-6 gap-3">
+        <div className="w-12 h-12 rounded-2xl bg-surface-hover border border-border flex items-center justify-center">
+          <Sparkles className="w-5 h-5 text-muted" />
+        </div>
+        <div>
+          <p className="text-sm font-medium text-foreground-secondary">AI is turned off</p>
+          <p className="text-xs text-muted mt-1 max-w-[260px]">
+            Enable AI features in Settings to chat with Socrates. Your data stays on your device until you do.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   const hasMessages = chatMessages.length > 0 || !!streamingContent;
 
   // Visual state — command glow when a valid command is matched
@@ -333,32 +424,86 @@ export default function AIAssistant({ goal }: Props) {
   return (
     <div className="flex flex-col flex-1 min-w-0 min-h-0">
       {/* Header */}
-      <div className="flex items-center justify-between px-5 py-3.5 border-b border-border flex-shrink-0">
-        <div className="flex items-center gap-2">
-          <div className={`w-2 h-2 rounded-full ${
+      <div className="flex items-center justify-between px-5 py-3.5 border-b border-border flex-shrink-0 relative">
+        <div className="flex items-center gap-2 min-w-0">
+          <div className={`w-2 h-2 rounded-full flex-shrink-0 ${
             unrestricted ? "bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.6)]" : "bg-foreground-secondary animate-pulse"
           }`} />
-          <span className="text-sm font-medium text-foreground-secondary">Socrates</span>
+          <span className="text-sm font-medium text-foreground-secondary flex-shrink-0">Socrates</span>
           {unrestricted ? (
-            <span className="flex items-center gap-1 text-xs text-amber-400/80 ml-1">
+            <span className="flex items-center gap-1 text-xs text-amber-400/80 ml-1 flex-shrink-0">
               <Zap className="w-3 h-3" />
               unrestricted
             </span>
           ) : (
-            <span className="text-xs text-muted ml-1">
+            <span className="text-xs text-muted ml-1 flex-shrink-0">
               {VENDOR_LABELS[aiVendor]}
             </span>
           )}
+          {agentMode && (
+            <span className="text-xs text-accent ml-1 flex-shrink-0" title="Agent mode — Socrates can act on the app">
+              · agent
+            </span>
+          )}
         </div>
-        {hasMessages && (
+        <div className="flex items-center gap-1 flex-shrink-0">
+          {/* Conversation switcher */}
           <button
-            onClick={handleClear}
-            className="flex items-center gap-1.5 btn-ghost text-xs"
+            onClick={() => setShowConversations((v) => !v)}
+            className="flex items-center gap-1.5 btn-ghost text-xs max-w-[140px]"
+            title="Conversations"
           >
-            <Trash2 className="w-3 h-3" />
-            Clear
+            <MessageSquare className="w-3 h-3 flex-shrink-0" />
+            <span className="truncate">{activeConv?.title ?? "New chat"}</span>
+            <ChevronDown className="w-3 h-3 flex-shrink-0" />
           </button>
+          <button
+            onClick={() => { newConversation(); setError(""); setShowConversations(false); }}
+            className="flex items-center justify-center w-7 h-7 rounded-lg text-muted
+                       hover:text-foreground-secondary hover:bg-surface-hover transition-all"
+            title="New conversation"
+          >
+            <Plus className="w-3.5 h-3.5" />
+          </button>
+        </div>
+
+        {showConversations && (
+          <div className="fixed inset-0 z-40" onClick={() => setShowConversations(false)} />
         )}
+        <AnimatePresence>
+          {showConversations && (
+              <motion.div
+                initial={{ opacity: 0, y: -4 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -4 }}
+                transition={{ duration: 0.12 }}
+                className="absolute right-4 top-full mt-1 w-64 max-h-72 overflow-y-auto z-50
+                           bg-surface-elevated border border-border rounded-lg shadow-xl py-1"
+              >
+                {conversations.length === 0 && (
+                  <p className="px-3 py-2 text-xs text-muted">No conversations yet.</p>
+                )}
+                {conversations.map((c) => (
+                  <div
+                    key={c.id}
+                    className={`group flex items-center gap-2 px-3 py-2 cursor-pointer transition-colors
+                               ${c.id === activeConversationId ? "bg-surface-hover" : "hover:bg-surface-hover"}`}
+                    onClick={() => { switchConversation(c.id); setShowConversations(false); setError(""); }}
+                  >
+                    <MessageSquare className="w-3 h-3 text-muted flex-shrink-0" />
+                    <span className="flex-1 truncate text-xs text-foreground-secondary">{c.title}</span>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); deleteConversation(c.id); }}
+                      className="opacity-0 group-hover:opacity-100 text-muted hover:text-red-400 transition-all flex-shrink-0"
+                      title="Delete conversation"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                    </button>
+                  </div>
+                ))}
+              </motion.div>
+          )}
+        </AnimatePresence>
       </div>
 
       {/* Messages */}
