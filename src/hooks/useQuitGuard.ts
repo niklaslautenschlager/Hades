@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useStore } from "../store/useStore";
-import { syncDirtyNotes } from "../lib/noteSync";
+import { fullSync } from "../lib/noteSync";
 
 export function useQuitGuard() {
   useEffect(() => {
@@ -23,7 +23,7 @@ export function useQuitGuard() {
 
       try {
         const fresh = useStore.getState();
-        await syncDirtyNotes(fresh.notes, fresh.syncFolder!, fresh.lastSyncAt);
+        await fullSync(fresh.syncFolder!, fresh.notes);
         useStore.getState().setLastSyncAt(new Date().toISOString());
         useStore.getState().setHasPendingChanges(false);
       } catch (e) {

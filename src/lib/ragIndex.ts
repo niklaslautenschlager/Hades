@@ -169,11 +169,28 @@ async function embedChunks(chunks: RagChunk[]): Promise<void> {
 export interface RagStatus {
   chunks: number;
   lastBuilt: string | null;
+  /** Notes whose latest edit isn't reflected in the index yet. */
+  staleNotes: number;
 }
 
 export async function getRagStatus(): Promise<RagStatus> {
   await ensureLoaded();
-  return { chunks: index.length, lastBuilt };
+  const notes = useStore
+    .getState()
+    .notes.filter((n) => !n.isFolder && n.content.trim().length > 0);
+  const freshest = new Map<string, string>(); // sourceId → newest chunk updatedAt
+  for (const c of index) {
+    const cur = freshest.get(c.sourceId);
+    if (!cur || c.updatedAt > cur) freshest.set(c.sourceId, c.updatedAt);
+  }
+  let staleNotes = 0;
+  if (index.length > 0) {
+    for (const n of notes) {
+      const idxAt = freshest.get(n.id);
+      if (!idxAt || idxAt < n.updatedAt) staleNotes++;
+    }
+  }
+  return { chunks: index.length, lastBuilt, staleNotes };
 }
 
 /** Full rebuild from all notes + library PDFs. Throws if embeddings fail. */
@@ -236,29 +253,117 @@ export async function removeFromIndex(sourceId: string): Promise<void> {
 
 export interface RagHit {
   text: string;
+  sourceId: string;
   sourceName: string;
   sourceType: "note" | "pdf";
   score: number;
 }
 
-/** Semantic search. Returns [] (and never throws) when embeddings are unavailable. */
-export async function search(query: string, k = 6): Promise<RagHit[]> {
-  await ensureLoaded();
-  if (index.length === 0) return [];
-  let qvec: number[];
-  try {
-    [qvec] = await embed([query], "query");
-  } catch {
-    return [];
+export interface SearchOpts {
+  /** Restrict retrieval to a single note/PDF (e.g. "chat with this PDF"). */
+  sourceId?: string;
+}
+
+// ── Keyword scoring (hybrid component; also the no-Ollama fallback) ──────────
+
+const STOPWORDS = new Set([
+  "the", "a", "an", "and", "or", "of", "to", "in", "on", "for", "with", "about",
+  "my", "me", "i", "you", "it", "is", "are", "was", "what", "which", "that",
+  "this", "from", "do", "does", "say", "says", "how", "why", "when",
+]);
+
+function queryTerms(q: string): string[] {
+  const seen = new Set<string>();
+  for (const t of q.toLowerCase().split(/[^\p{L}\p{N}]+/u)) {
+    if (t.length >= 3 && !STOPWORDS.has(t)) seen.add(t);
+    if (seen.size >= 24) break; // keep long-text queries (related notes) cheap
   }
-  if (!qvec) return [];
-  return index
-    .map((c) => ({
-      text: c.text,
-      sourceName: c.sourceName,
-      sourceType: c.sourceType,
-      score: cosine(qvec, c.vector),
+  return [...seen];
+}
+
+function keywordScore(text: string, sourceName: string, terms: string[]): number {
+  if (terms.length === 0) return 0;
+  const lower = text.toLowerCase();
+  const name = sourceName.toLowerCase();
+  let score = 0;
+  for (const t of terms) {
+    if (name.includes(t)) score += 3;
+    let i = 0;
+    let occ = 0;
+    while (occ < 5 && (i = lower.indexOf(t, i)) !== -1) {
+      occ++;
+      i += t.length;
+    }
+    score += occ;
+  }
+  return score;
+}
+
+/**
+ * Hybrid search: semantic (Ollama embeddings) blended with a keyword bonus.
+ * Degrades gracefully — keyword-only over indexed chunks when embeddings fail,
+ * and keyword-only over the live note store when there's no index at all.
+ * Never throws.
+ */
+export async function search(query: string, k = 6, opts: SearchOpts = {}): Promise<RagHit[]> {
+  await ensureLoaded();
+  const terms = queryTerms(query);
+  const pool = opts.sourceId ? index.filter((c) => c.sourceId === opts.sourceId) : index;
+
+  // 1) Semantic + keyword bonus over the indexed chunks.
+  if (pool.length > 0) {
+    let qvec: number[] | null = null;
+    try {
+      [qvec] = await embed([query], "query");
+    } catch {
+      qvec = null;
+    }
+    if (qvec) {
+      const qv = qvec;
+      return pool
+        .map((c) => ({
+          text: c.text,
+          sourceId: c.sourceId,
+          sourceName: c.sourceName,
+          sourceType: c.sourceType,
+          // Cosine is the primary signal; a capped keyword bonus nudges exact
+          // term matches above near-ties.
+          score: cosine(qv, c.vector) + 0.04 * Math.min(keywordScore(c.text, c.sourceName, terms), 5),
+        }))
+        .sort((a, b) => b.score - a.score)
+        .slice(0, k);
+    }
+
+    // 2) Embeddings unavailable — keyword-only over the indexed chunks.
+    const hits = pool
+      .map((c) => ({
+        text: c.text,
+        sourceId: c.sourceId,
+        sourceName: c.sourceName,
+        sourceType: c.sourceType,
+        score: keywordScore(c.text, c.sourceName, terms),
+      }))
+      .filter((h) => h.score >= 3)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, k);
+    if (hits.length > 0) return hits;
+  }
+
+  // 3) No index (or no scoped chunks) — keyword over the live note store so
+  //    retrieval still works without Ollama ever having run.
+  const notes = useStore
+    .getState()
+    .notes.filter((n) => !n.isFolder && n.content.trim().length > 0)
+    .filter((n) => !opts.sourceId || n.id === opts.sourceId);
+  return notes
+    .map((n) => ({
+      text: n.content.slice(0, 1500),
+      sourceId: n.id,
+      sourceName: n.name || "Untitled note",
+      sourceType: "note" as const,
+      score: keywordScore(n.content, n.name, terms),
     }))
+    .filter((h) => h.score >= 3)
     .sort((a, b) => b.score - a.score)
     .slice(0, k);
 }

@@ -8,7 +8,7 @@ import { AI_MODELS, VENDOR_LABELS, VENDOR_KEY_URLS, VENDOR_INFO, VENDOR_TIER_LAB
 import { getRagStatus, rebuildIndex, clearIndex, EMBED_MODEL } from "../../lib/ragIndex";
 import { THEMES, THEME_GROUPS } from "../../lib/themes";
 import { previewSound } from "../../lib/sound";
-import { syncDirtyNotes } from "../../lib/noteSync";
+import { fullSync } from "../../lib/noteSync";
 import { installUpdate, restartApp, hostPlatform } from "../../lib/updater";
 
 interface Props {
@@ -51,6 +51,8 @@ export default function SettingsModal({ onClose }: Props) {
     wipeAllAIData,
     autoSyncDeadlines,
     setAutoSyncDeadlines,
+    sessionReflectionEnabled,
+    setSessionReflectionEnabled,
     showWeekNumbers,
     setShowWeekNumbers,
     weekStartsOn,
@@ -104,6 +106,8 @@ export default function SettingsModal({ onClose }: Props) {
       wipeAllAIData: s.wipeAllAIData,
       autoSyncDeadlines: s.autoSyncDeadlines,
       setAutoSyncDeadlines: s.setAutoSyncDeadlines,
+      sessionReflectionEnabled: s.sessionReflectionEnabled,
+      setSessionReflectionEnabled: s.setSessionReflectionEnabled,
       showWeekNumbers: s.showWeekNumbers,
       setShowWeekNumbers: s.setShowWeekNumbers,
       weekStartsOn: s.weekStartsOn,
@@ -158,6 +162,7 @@ export default function SettingsModal({ onClose }: Props) {
   // Study (RAG) index status, loaded lazily for the AI tab.
   const [ragChunks, setRagChunks] = useState<number | null>(null);
   const [ragBuilt, setRagBuilt] = useState<string | null>(null);
+  const [ragStale, setRagStale] = useState(0);
   const [ragBusy, setRagBusy] = useState(false);
   const [ragMsg, setRagMsg] = useState<string | null>(null);
 
@@ -168,6 +173,7 @@ export default function SettingsModal({ onClose }: Props) {
       if (!alive) return;
       setRagChunks(s.chunks);
       setRagBuilt(s.lastBuilt);
+      setRagStale(s.staleNotes);
     });
     return () => { alive = false; };
   }, [tab]);
@@ -179,6 +185,7 @@ export default function SettingsModal({ onClose }: Props) {
       const count = await rebuildIndex();
       setRagChunks(count);
       setRagBuilt(new Date().toISOString());
+      setRagStale(0);
       setRagMsg(`Indexed ${count} chunk${count === 1 ? "" : "s"}.`);
     } catch (e) {
       const raw = e instanceof Error ? e.message : String(e);
@@ -548,7 +555,7 @@ export default function SettingsModal({ onClose }: Props) {
                           ? "Study index"
                           : ragChunks === 0
                           ? "Study index — empty"
-                          : `${ragChunks} chunk${ragChunks === 1 ? "" : "s"}${ragBuilt ? ` · ${new Date(ragBuilt).toLocaleDateString()}` : ""}`}
+                          : `${ragChunks} chunk${ragChunks === 1 ? "" : "s"}${ragBuilt ? ` · ${new Date(ragBuilt).toLocaleDateString()}` : ""}${ragStale > 0 ? ` · ${ragStale} note${ragStale === 1 ? "" : "s"} not indexed` : ""}`}
                       </span>
                     </div>
                     <button
@@ -611,6 +618,12 @@ export default function SettingsModal({ onClose }: Props) {
                   description="Display ISO week numbers in calendar views."
                   value={showWeekNumbers}
                   onChange={setShowWeekNumbers}
+                />
+                <Toggle
+                  label="Ask for a session reflection"
+                  description="After each focus session, a quick prompt asks what you got done — logged for your weekly review."
+                  value={sessionReflectionEnabled}
+                  onChange={setSessionReflectionEnabled}
                 />
               </div>
             </section>
@@ -783,7 +796,8 @@ export default function SettingsModal({ onClose }: Props) {
                             setIsSyncing(true);
                             setSyncError(null);
                             try {
-                              await syncDirtyNotes(notes, syncFolder, null);
+                              const { mergedNotes } = await fullSync(syncFolder, notes);
+                              useStore.getState().applyMergedNotes(mergedNotes);
                               setLastSyncAt(new Date().toISOString());
                               setHasPendingChanges(false);
                             } catch (e) {

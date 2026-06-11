@@ -153,6 +153,12 @@ export interface FocusSession {
   sessions: number;    // pomodoro sessions completed
 }
 
+export interface FocusReflection {
+  at: string;          // ISO timestamp
+  goal: string;        // the session goal at the time (may be empty)
+  text: string;        // what the user said they accomplished
+}
+
 // ─── PDF Library Types ───────────────────────────────────────────────────────
 
 export interface LibraryDoc {
@@ -192,6 +198,11 @@ interface AppState {
   // Let the assistant act on the app (create tasks, flashcards, events, …)
   agentMode: boolean;
   setAgentMode: (v: boolean) => void;
+  // One-shot seed for the assistant input box (set by "Chat with this PDF",
+  // the command palette, etc.). The assistant consumes & clears it. The
+  // counter forces re-consumption even when the same text is seeded twice.
+  assistantSeed: { text: string; n: number } | null;
+  seedAssistant: (text: string) => void;
 
   setActiveModule: (m: Module) => void;
   setApiKey: (key: string) => void;
@@ -334,6 +345,14 @@ interface AppState {
   focusSessions: FocusSession[];
   recordFocusTime: (seconds: number) => void;
 
+  // ── Session reflections (F12) ──────────────────────────────────────────────
+  sessionReflectionEnabled: boolean;             // setting: prompt after work sessions
+  setSessionReflectionEnabled: (v: boolean) => void;
+  focusReflections: FocusReflection[];
+  reflectionPending: boolean;                    // a finished work session awaits a note
+  addReflection: (text: string) => void;
+  dismissReflection: () => void;
+
   // ── PDF Library ─────────────────────────────────────────────────────────────
   libraryDocs: LibraryDoc[];
   addLibraryDoc: (doc: LibraryDoc) => void;
@@ -344,9 +363,13 @@ interface AppState {
   syncFolder: string | null;
   syncEnabled: boolean;
   lastSyncAt: string | null;
+  // Deletion tombstones (note/folder id → deletedAt ISO) so deletes propagate
+  // to other devices instead of resurrecting on the next pull.
+  deletedNoteIds: Record<string, string>;
   setSyncFolder: (path: string | null) => void;
   setSyncEnabled: (v: boolean) => void;
   setLastSyncAt: (ts: string | null) => void;
+  setDeletedNoteIds: (m: Record<string, string>) => void;
 
   // ── Sync runtime (ephemeral, not persisted) ────────────────────────────────
   isSyncing: boolean;
@@ -420,6 +443,9 @@ export const useStore = create<AppState>()(
       setAiUseStudyContext: (aiUseStudyContext) => set({ aiUseStudyContext }),
       agentMode: false,
       setAgentMode: (agentMode) => set({ agentMode }),
+      assistantSeed: null,
+      seedAssistant: (text) =>
+        set((s) => ({ assistantSeed: { text, n: (s.assistantSeed?.n ?? 0) + 1 }, activeModule: "pomodoro" })),
 
       setActiveModule: (activeModule) => set({ activeModule }),
       setApiKey: (apiKey) =>
@@ -885,10 +911,19 @@ export const useStore = create<AppState>()(
               openNoteIds[prevIdx] ?? openNoteIds[prevIdx - 1] ?? openNoteIds[openNoteIds.length - 1] ?? null;
           }
 
+          // Record tombstones so the deletion propagates to other devices.
+          const deletedNoteIds = { ...s.deletedNoteIds };
+          if (s.syncEnabled) {
+            const now = new Date().toISOString();
+            for (const did of toDelete) deletedNoteIds[did] = now;
+          }
+
           return {
             notes: s.notes.filter((n) => !toDelete.has(n.id)),
             openNoteIds,
             activeNoteId,
+            deletedNoteIds,
+            hasPendingChanges: s.syncEnabled ? true : s.hasPendingChanges,
           };
         }),
       moveNote: (id, newParentId) =>
@@ -1052,6 +1087,10 @@ export const useStore = create<AppState>()(
       onWorkSessionComplete: (wasWork) => {
         if (!wasWork) return;
         const s = get();
+
+        // F12 — invite a one-line reflection on what was accomplished.
+        if (s.sessionReflectionEnabled) set({ reflectionPending: true });
+
         const id = s.activeTaskId;
         if (!id) return;
         const task = s.tasks.find((t) => t.id === id);
@@ -1246,6 +1285,22 @@ export const useStore = create<AppState>()(
         });
       },
 
+      // ── Session reflections (F12) ──────────────────────────────────────────
+      sessionReflectionEnabled: true,
+      setSessionReflectionEnabled: (sessionReflectionEnabled) => set({ sessionReflectionEnabled }),
+      focusReflections: [],
+      reflectionPending: false,
+      addReflection: (text) => {
+        const trimmed = text.trim();
+        set((s) => ({
+          reflectionPending: false,
+          focusReflections: trimmed
+            ? [...s.focusReflections, { at: new Date().toISOString(), goal: s.goal, text: trimmed }].slice(-300)
+            : s.focusReflections,
+        }));
+      },
+      dismissReflection: () => set({ reflectionPending: false }),
+
       // ── PDF Library ────────────────────────────────────────────────────────
       libraryDocs: [],
       addLibraryDoc: (doc) =>
@@ -1261,9 +1316,11 @@ export const useStore = create<AppState>()(
       syncFolder: null,
       syncEnabled: false,
       lastSyncAt: null,
+      deletedNoteIds: {},
       setSyncFolder: (syncFolder) => set({ syncFolder }),
       setSyncEnabled: (syncEnabled) => set({ syncEnabled }),
       setLastSyncAt: (lastSyncAt) => set({ lastSyncAt }),
+      setDeletedNoteIds: (deletedNoteIds) => set({ deletedNoteIds }),
 
       isSyncing: false,
       hasPendingChanges: false,
@@ -1293,7 +1350,7 @@ export const useStore = create<AppState>()(
     }),
     {
       name: "hades-store",
-      version: 5,
+      version: 7,
       migrate: (persisted: any, version) => {
         if (!persisted) return persisted;
         if (version < 2) {
@@ -1364,6 +1421,15 @@ export const useStore = create<AppState>()(
           }
           if (!("aiUseStudyContext" in persisted)) persisted.aiUseStudyContext = false;
         }
+        if (version < 6) {
+          if (!persisted.deletedNoteIds || typeof persisted.deletedNoteIds !== "object") {
+            persisted.deletedNoteIds = {};
+          }
+        }
+        if (version < 7) {
+          if (!("sessionReflectionEnabled" in persisted)) persisted.sessionReflectionEnabled = true;
+          if (!Array.isArray(persisted.focusReflections)) persisted.focusReflections = [];
+        }
         return persisted;
       },
       partialize: (s) => ({
@@ -1372,6 +1438,7 @@ export const useStore = create<AppState>()(
         _intervalId: null,
         timerEndsAt: null,
         taskFinishPrompt: null,
+        assistantSeed: null,
         isChatLoading: false,
         notePdfUrl: null,
         notePdfFileName: "",

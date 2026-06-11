@@ -1,0 +1,47 @@
+import { completeOnce } from "./aiOneShot";
+
+// F5/F7 — editor-side AI assists. All of these return plain markdown text;
+// callers apply it through editorBridge so the change lands in the editor's
+// undo history.
+
+const TIDY_SYSTEM = `You clean up and format markdown notes.
+Rules:
+- Fix structure: sensible headings, consistent bullet style, proper code fences, spacing.
+- Fix obvious typos and broken markdown syntax.
+- PRESERVE the author's content, meaning, wording and language — you are a formatter, not an editor.
+- Keep [[wikilinks]], $math$, tags and URLs exactly as they are.
+- Output ONLY the cleaned markdown. No commentary, no code fence around the whole document.`;
+
+export async function tidyNote(content: string): Promise<string> {
+  const out = await completeOnce({
+    system: TIDY_SYSTEM,
+    user: content.slice(0, 16000),
+    maxTokens: 4096,
+  });
+  const trimmed = out.trim();
+  // Some models wrap the whole answer in a fence despite instructions.
+  const fence = /^```(?:markdown|md)?\s*\n([\s\S]*?)\n```$/.exec(trimmed);
+  return (fence ? fence[1] : trimmed) + "\n";
+}
+
+export type AssistAction = "expand" | "condense" | "rephrase" | "continue";
+
+const ASSIST_PROMPTS: Record<AssistAction, string> = {
+  expand:
+    "Expand the passage with more detail, examples or explanation, keeping the author's voice and language. Return ONLY the expanded replacement text.",
+  condense:
+    "Condense the passage to its essential points, keeping the author's voice and language. Return ONLY the condensed replacement text.",
+  rephrase:
+    "Rephrase the passage more clearly, keeping the meaning, voice and language. Return ONLY the rephrased replacement text.",
+  continue:
+    "Continue writing from where the passage ends, matching its style, tone and language. Return ONLY the continuation (do not repeat the passage).",
+};
+
+export async function assistRewrite(action: AssistAction, selection: string): Promise<string> {
+  const out = await completeOnce({
+    system: `You are a precise writing assistant working inside a markdown note. ${ASSIST_PROMPTS[action]} Never add commentary, quotes around the text, or a code fence.`,
+    user: selection.slice(0, 8000),
+    maxTokens: 2048,
+  });
+  return out.trim();
+}

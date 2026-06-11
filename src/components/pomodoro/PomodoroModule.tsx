@@ -12,6 +12,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useShallow } from "zustand/react/shallow";
 import { useStore, type PomodoroMode } from "../../store/useStore";
 import AIAssistant from "./AIAssistant";
+import ReflectionPrompt from "./ReflectionPrompt";
 
 const MODE_LABELS: Record<PomodoroMode, string> = {
   work: "Focus",
@@ -372,6 +373,9 @@ export default function PomodoroModule() {
 
       {/* ── Right: AI chat ────────────────────────────────────────────── */}
       <AIAssistant goal={goal} />
+
+      {/* Session-end reflection (F12) */}
+      <ReflectionPrompt />
     </div>
   );
 }

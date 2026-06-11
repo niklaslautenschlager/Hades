@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Plus, Trash2, BookOpen, Loader2, FileText } from "lucide-react";
+import { Plus, Trash2, BookOpen, Loader2, FileText, MessageSquare } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useShallow } from "zustand/react/shallow";
 import { useStore, type LibraryDoc } from "../../store/useStore";
@@ -20,6 +20,8 @@ export default function LibraryPanel() {
     showNotepadPdf,
     toggleNotepadPdf,
     notePdfUrl,
+    aiEnabled,
+    seedAssistant,
   } = useStore(
     useShallow((s) => ({
       libraryDocs: s.libraryDocs,
@@ -29,6 +31,8 @@ export default function LibraryPanel() {
       showNotepadPdf: s.showNotepadPdf,
       toggleNotepadPdf: s.toggleNotepadPdf,
       notePdfUrl: s.notePdfUrl,
+      aiEnabled: s.aiEnabled,
+      seedAssistant: s.seedAssistant,
     }))
   );
 
@@ -131,14 +135,29 @@ export default function LibraryPanel() {
                   {doc.sizeBytes ? <span>{formatBytes(doc.sizeBytes)}</span> : null}
                 </div>
               </div>
-              <button
-                onClick={(e) => { e.stopPropagation(); handleDelete(doc); }}
-                className="opacity-0 group-hover:opacity-100 flex-shrink-0 p-0.5 rounded
-                           text-muted hover:text-red-400 transition-all"
-                title="Remove from library"
-              >
-                <Trash2 className="w-3 h-3" />
-              </button>
+              <div className="flex items-center gap-0.5 flex-shrink-0">
+                {aiEnabled && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      seedAssistant(`Using my PDF "${doc.title}", `);
+                    }}
+                    className="opacity-0 group-hover:opacity-100 p-0.5 rounded
+                               text-muted hover:text-foreground transition-all"
+                    title={`Chat with "${doc.title}"`}
+                  >
+                    <MessageSquare className="w-3 h-3" />
+                  </button>
+                )}
+                <button
+                  onClick={(e) => { e.stopPropagation(); handleDelete(doc); }}
+                  className="opacity-0 group-hover:opacity-100 p-0.5 rounded
+                             text-muted hover:text-red-400 transition-all"
+                  title="Remove from library"
+                >
+                  <Trash2 className="w-3 h-3" />
+                </button>
+              </div>
             </div>
           ))
         )}

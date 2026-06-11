@@ -6,10 +6,12 @@ import CalendarModule from "./components/calendar/CalendarModule";
 import PomodoroModule from "./components/pomodoro/PomodoroModule";
 import TasksModule from "./components/tasks/TasksModule";
 import SyncOverlay from "./components/SyncOverlay";
+import CommandPalette from "./components/CommandPalette";
 import { useSyncTimer } from "./hooks/useSyncTimer";
 import { useStartupSync } from "./hooks/useStartupSync";
 import { useQuitGuard } from "./hooks/useQuitGuard";
 import { useUpdateCheck } from "./hooks/useUpdateCheck";
+import { useIcalSync } from "./hooks/useIcalSync";
 
 // Lazy-load heavy modules
 const NotepadModule = lazy(() => import("./components/notepad/NotepadModule"));
@@ -30,6 +32,7 @@ export default function App() {
   useStartupSync();
   useQuitGuard();
   useUpdateCheck();
+  useIcalSync();
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
@@ -68,6 +71,7 @@ export default function App() {
         </motion.div>
       </AnimatePresence>
       <SyncOverlay />
+      <CommandPalette />
     </Shell>
   );
 }

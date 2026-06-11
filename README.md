@@ -1,8 +1,8 @@
-# Hades `v0.6.0`
+# Hades `v0.7.0`
 
 > **Early software.** Bugs and missing features are expected. Use at your own risk and back up any important data.
 >
-> 🆕 **New in 0.6.0:** a real AI **study agent** that can act on the app (create tasks, events, flashcards & notes), **local RAG** over your notes & PDFs via Ollama embeddings, multi-vendor AI (Groq/OpenAI/Anthropic/DeepSeek/Ollama) with a privacy opt-in, multi-conversation memory, a fixed PDF **Library**, calculator results as live **KaTeX** math in notes, and a cleaner tabbed Settings. See **[docs/whats-new-0.6.0.md](docs/whats-new-0.6.0.md)**.
+> 🆕 **New in 0.7.0:** rebuilt **cloud sync** (no more duplicated/scattered notes; deletions propagate), recurring **iCal** events now expand and the assistant reads your calendar in local time, plus AI **citations**, **chat-with-a-PDF**, **day/week planning**, one-click **flashcard generation** & note **tidy**, inline **writing assist**, related-note **wikilink** suggestions, **session reflections** + an AI **Weekly Review**, and a **⌘K command palette**. See **[docs/whats-new-0.7.0.md](docs/whats-new-0.7.0.md)**.
 
 A focused, distraction-free desktop productivity suite built for students and knowledge workers. Hades combines a Pomodoro timer with an AI study assistant, a markdown note editor, calendar, task manager, flashcards with spaced repetition, and detailed focus statistics — all in one unified interface.
 

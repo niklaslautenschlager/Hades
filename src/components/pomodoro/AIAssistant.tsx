@@ -16,6 +16,7 @@ import {
   type Command,
 } from "../../lib/ai";
 import { retrieveContext } from "../../lib/aiContext";
+import { renderAssistantHtml, handleCitationClick } from "../../lib/citations";
 import {
   buildAgentSystemPrompt,
   parseToolCalls,
@@ -104,6 +105,7 @@ export default function AIAssistant({ goal }: Props) {
   const setUnrestricted = setConversationUnrestricted;
 
   const [input, setInput] = useState("");
+  const assistantSeed = useStore((s) => s.assistantSeed);
   const [streamingContent, setStreamingContent] = useState("");
   const [error, setError] = useState("");
   const [showConversations, setShowConversations] = useState(false);
@@ -117,6 +119,19 @@ export default function AIAssistant({ goal }: Props) {
   const matchedCommand = useMemo(() => findCommand(input.trim()), [input]);
 
   useEffect(() => setSelectedHint(0), [input]);
+
+  // Consume a one-shot seed (e.g. "Chat with this PDF", command palette).
+  useEffect(() => {
+    if (!assistantSeed) return;
+    setInput(assistantSeed.text);
+    useStore.setState({ assistantSeed: null });
+    setTimeout(() => {
+      inputRef.current?.focus();
+      const el = inputRef.current;
+      if (el) el.setSelectionRange(el.value.length, el.value.length);
+    }, 0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [assistantSeed?.n]);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
@@ -571,7 +586,8 @@ export default function AIAssistant({ goal }: Props) {
               ) : (
                 <div
                   className="markdown-body prose-chat max-w-[80%] px-3.5 py-2.5 rounded-2xl rounded-tl-sm bg-surface-elevated border border-border"
-                  dangerouslySetInnerHTML={{ __html: marked.parse(msg.content) as string }}
+                  onClick={(e) => handleCitationClick(e.target as HTMLElement)}
+                  dangerouslySetInnerHTML={{ __html: renderAssistantHtml(msg.content) }}
                 />
               )}
             </motion.div>

@@ -64,7 +64,10 @@ export async function retrieveContext(query: string): Promise<string> {
       const blocks = hits.map(
         (h) => `### ${h.sourceType === "pdf" ? "PDF" : "Note"}: ${h.sourceName}\n${h.text.trim()}`
       );
-      return blocks.join("\n\n");
+      return (
+        blocks.join("\n\n") +
+        `\n\nWhen your answer draws on one of the sources above, cite it inline as [Note: <name>] or [PDF: <name>] using the exact source name. Only cite sources that actually appear above.`
+      );
     }
   } catch {
     /* fall through to the lightweight snapshot */

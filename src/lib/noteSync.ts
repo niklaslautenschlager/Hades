@@ -1,30 +1,71 @@
-import { mkdir, readDir, readTextFile, writeTextFile } from "@tauri-apps/plugin-fs";
-import type { NoteFile } from "../store/useStore";
+import { mkdir, readDir, readTextFile, writeTextFile, remove } from "@tauri-apps/plugin-fs";
+import { useStore, type NoteFile } from "../store/useStore";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Cloud sync engine (v2) — id-stable identity.
+//
+// Design principles (fixes the duplication/scatter bug):
+//  • A note's identity is its `id`, carried in frontmatter together with its
+//    `name` and `parentId`. The on-disk path is only a human-readable
+//    projection — it is NEVER used to decide identity.
+//  • Folders live in a versioned manifest (_hades.json) keyed by folder id.
+//    Folder ids are never invented for an already-known path, so two devices
+//    can't ping-pong fresh ids for the same logical folder.
+//  • Every sync is a full reconcile: pull-merge by id, push notes whose disk
+//    copy is missing/stale, then PRUNE files at stale paths (renames/moves),
+//    duplicate-id files, and tombstoned notes. Repeated syncs are idempotent.
+//  • Deletions propagate via tombstones (id → deletedAt) stored both in the
+//    manifest and in the local store.
+// ─────────────────────────────────────────────────────────────────────────────
 
 function uid(): string {
   return Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
 }
 
+const TOMBSTONE_MAX_AGE_MS = 90 * 24 * 3600_000;
+
 // ── Frontmatter ───────────────────────────────────────────────────────────────
 
 function serialize(note: NoteFile): string {
-  return `---\nid: ${note.id}\ntags: ${note.tags.join(",")}\ncreatedAt: ${note.createdAt}\nupdatedAt: ${note.updatedAt}\n---\n${note.content}`;
+  return [
+    "---",
+    `id: ${note.id}`,
+    `name: ${note.name.replace(/\n/g, " ")}`,
+    `parentId: ${note.parentId ?? ""}`,
+    `tags: ${note.tags.join(",")}`,
+    `createdAt: ${note.createdAt}`,
+    `updatedAt: ${note.updatedAt}`,
+    "---",
+    note.content,
+  ].join("\n");
 }
 
-function parseFrontmatter(raw: string): {
-  id: string; tags: string[]; createdAt: string; updatedAt: string; content: string;
-} | null {
+interface ParsedNote {
+  id: string;
+  name: string | null;      // null on legacy files (name lived in the filename)
+  parentId: string | null;  // null = root; legacy files resolve via path
+  hasParentField: boolean;  // legacy files lack the field entirely
+  tags: string[];
+  createdAt: string;
+  updatedAt: string;
+  content: string;
+}
+
+function parseFrontmatter(raw: string): ParsedNote | null {
   if (!raw.startsWith("---\n")) return null;
   const end = raw.indexOf("\n---\n", 4);
   if (end === -1) return null;
   const meta: Record<string, string> = {};
   for (const line of raw.slice(4, end).split("\n")) {
-    const sep = line.indexOf(": ");
-    if (sep >= 0) meta[line.slice(0, sep).trim()] = line.slice(sep + 2).trim();
+    const sep = line.indexOf(":");
+    if (sep >= 0) meta[line.slice(0, sep).trim()] = line.slice(sep + 1).trim();
   }
   if (!meta.id) return null;
   return {
     id: meta.id,
+    name: meta.name || null,
+    parentId: meta.parentId || null,
+    hasParentField: "parentId" in meta,
     tags: meta.tags ? meta.tags.split(",").map(t => t.trim()).filter(Boolean) : [],
     createdAt: meta.createdAt ?? new Date().toISOString(),
     updatedAt: meta.updatedAt ?? new Date().toISOString(),
@@ -38,220 +79,332 @@ export function safeName(name: string): string {
   return (name.replace(/[/\\:*?"<>|]/g, "-").trim().slice(0, 80)) || "untitled";
 }
 
-function noteContainerDir(note: NoteFile, allNotes: NoteFile[], root: string): string {
+/** Relative dir parts for a folder/note's container, walking parentId chain. */
+function containerParts(parentId: string | null, byId: Map<string, NoteFile>): string[] {
   const segs: string[] = [];
-  let pid = note.parentId;
-  while (pid) {
-    const p = allNotes.find(n => n.id === pid);
-    if (!p) break;
+  const seen = new Set<string>();
+  let pid = parentId;
+  while (pid && !seen.has(pid)) {
+    seen.add(pid);
+    const p = byId.get(pid);
+    if (!p || !p.isFolder) break;
     segs.unshift(safeName(p.name));
     pid = p.parentId;
   }
-  return [root, ...segs].join("/");
+  return segs;
 }
 
-function noteFilePath(note: NoteFile, allNotes: NoteFile[], root: string): string {
-  const dir = noteContainerDir(note, allNotes, root);
-  return `${dir}/${safeName(note.name)}-${note.id.slice(0, 6)}.md`;
+function noteRelPath(note: NoteFile, byId: Map<string, NoteFile>): string {
+  const dir = containerParts(note.parentId, byId);
+  return [...dir, `${safeName(note.name)}-${note.id}.md`].join("/");
 }
 
-function folderAbsPath(folder: NoteFile, allNotes: NoteFile[], root: string): string {
-  return `${noteContainerDir(folder, allNotes, root)}/${safeName(folder.name)}`;
+function folderRelDir(folder: NoteFile, byId: Map<string, NoteFile>): string {
+  return [...containerParts(folder.parentId, byId), safeName(folder.name)].join("/");
 }
 
-// ── Folder index ──────────────────────────────────────────────────────────────
+// ── Manifest (_hades.json) ───────────────────────────────────────────────────
 
 const INDEX_FILE = "_hades.json";
-interface FolderIndex { folderIds: Record<string, string>; }
 
-async function readFolderIndex(root: string): Promise<FolderIndex> {
+interface ManifestFolder {
+  id: string;
+  name: string;
+  parentId: string | null;
+  updatedAt: string;
+}
+
+interface Manifest {
+  version: 2;
+  folders: ManifestFolder[];
+  tombstones: Record<string, string>; // id → deletedAt ISO
+}
+
+function emptyManifest(): Manifest {
+  return { version: 2, folders: [], tombstones: {} };
+}
+
+async function readManifest(root: string): Promise<Manifest> {
+  let raw: unknown;
   try {
-    return JSON.parse(await readTextFile(`${root}/${INDEX_FILE}`)) as FolderIndex;
+    raw = JSON.parse(await readTextFile(`${root}/${INDEX_FILE}`));
   } catch {
-    return { folderIds: {} };
+    return emptyManifest();
   }
-}
+  const obj = raw as Record<string, unknown>;
 
-async function writeFolderIndex(root: string, notes: NoteFile[]): Promise<void> {
-  const ids: Record<string, string> = {};
-  for (const f of notes.filter(n => n.isFolder)) {
-    const segs = [safeName(f.name)];
-    let pid = f.parentId;
-    while (pid) {
-      const p = notes.find(n => n.id === pid);
-      if (!p) break;
-      segs.unshift(safeName(p.name));
-      pid = p.parentId;
+  if (obj && obj.version === 2 && Array.isArray(obj.folders)) {
+    return {
+      version: 2,
+      folders: (obj.folders as ManifestFolder[]).filter(f => f && typeof f.id === "string"),
+      tombstones:
+        obj.tombstones && typeof obj.tombstones === "object"
+          ? (obj.tombstones as Record<string, string>)
+          : {},
+    };
+  }
+
+  // Legacy v1 shape: { folderIds: { "A/B": "<id>" } } — reconstruct hierarchy
+  // from the path keys so existing folder ids survive the upgrade.
+  if (obj && obj.folderIds && typeof obj.folderIds === "object") {
+    const pathToId = obj.folderIds as Record<string, string>;
+    const folders: ManifestFolder[] = [];
+    const now = new Date(0).toISOString(); // epoch → any real local edit wins
+    for (const [path, id] of Object.entries(pathToId)) {
+      const parts = path.split("/");
+      const parentPath = parts.slice(0, -1).join("/");
+      folders.push({
+        id,
+        name: parts[parts.length - 1],
+        parentId: parentPath ? pathToId[parentPath] ?? null : null,
+        updatedAt: now,
+      });
     }
-    ids[segs.join("/")] = f.id;
+    return { version: 2, folders, tombstones: {} };
   }
-  await writeTextFile(`${root}/${INDEX_FILE}`, JSON.stringify({ folderIds: ids }, null, 2));
+
+  return emptyManifest();
 }
 
-// ── Write dirty notes to sync folder ─────────────────────────────────────────
+async function writeManifest(root: string, notes: NoteFile[], tombstones: Record<string, string>): Promise<void> {
+  const manifest: Manifest = {
+    version: 2,
+    folders: notes
+      .filter(n => n.isFolder)
+      .map(f => ({ id: f.id, name: f.name, parentId: f.parentId, updatedAt: f.updatedAt })),
+    tombstones,
+  };
+  await writeTextFile(`${root}/${INDEX_FILE}`, JSON.stringify(manifest, null, 2));
+}
 
-export async function syncDirtyNotes(
-  allNotes: NoteFile[],
+// ── Disk walking ─────────────────────────────────────────────────────────────
+
+interface DiskFile {
+  rel: string;          // path relative to root, "/"-joined
+  parts: string[];      // path segments
+  parsed: ParsedNote | null;
+}
+
+async function walkDisk(
   root: string,
-  lastSyncAt: string | null
-): Promise<void> {
-  await mkdir(root, { recursive: true });
-
-  const dirtyNotes = allNotes.filter(
-    n => !n.isFolder && (!lastSyncAt || n.updatedAt > lastSyncAt)
-  );
-  if (dirtyNotes.length === 0 && allNotes.filter(n => n.isFolder).length === 0) return;
-
-  // Ensure all folder directories exist
-  for (const f of allNotes.filter(n => n.isFolder)) {
-    await mkdir(folderAbsPath(f, allNotes, root), { recursive: true });
-  }
-
-  for (const note of dirtyNotes) {
-    await mkdir(noteContainerDir(note, allNotes, root), { recursive: true });
-    await writeTextFile(noteFilePath(note, allNotes, root), serialize(note));
-  }
-
-  await writeFolderIndex(root, allNotes);
-}
-
-// ── Collect all .md files recursively ────────────────────────────────────────
-
-async function collectMdFiles(
-  dir: string,
   relParts: string[],
-  out: { full: string; parts: string[] }[]
+  files: DiskFile[],
+  dirs: string[]
 ): Promise<void> {
-  const entries = await readDir(dir);
+  const entries = await readDir([root, ...relParts].join("/"));
   for (const e of entries) {
     if (e.name.startsWith(".") || e.name === INDEX_FILE) continue;
-    const childFull = `${dir}/${e.name}`;
     if (e.isDirectory) {
-      await collectMdFiles(childFull, [...relParts, e.name], out);
+      const childParts = [...relParts, e.name];
+      dirs.push(childParts.join("/"));
+      await walkDisk(root, childParts, files, dirs);
     } else if (e.isFile && e.name.endsWith(".md")) {
-      out.push({ full: childFull, parts: [...relParts, e.name] });
+      const parts = [...relParts, e.name];
+      let parsed: ParsedNote | null = null;
+      try {
+        parsed = parseFrontmatter(await readTextFile([root, ...parts].join("/")));
+      } catch { /* unreadable — leave untouched */ }
+      files.push({ rel: parts.join("/"), parts, parsed });
     }
   }
 }
 
-// ── Initial bidirectional sync ────────────────────────────────────────────────
+/** Legacy filename → display name (strip "-<id6>" or "-<fullid>" suffix). */
+function nameFromFilename(filename: string): string {
+  const base = filename.replace(/\.md$/, "");
+  const m = /^(.+)-[a-z0-9]{6,}$/.exec(base);
+  return m ? m[1] : base;
+}
 
-export interface InitialSyncResult {
+// ── Full reconcile sync ───────────────────────────────────────────────────────
+
+export interface FullSyncResult {
   mergedNotes: NoteFile[];
-  // Notes that exist locally but not on disk — need uploading
-  needsUploadCount: number;
 }
 
-function resolveOrCreateFolderPath(
-  parts: string[],
-  pathToId: Map<string, string>,
-  notes: NoteFile[]
-): string | null {
-  if (parts.length === 0) return null;
-  let parentId: string | null = null;
-  for (let i = 0; i < parts.length; i++) {
-    const path = parts.slice(0, i + 1).join("/");
-    let fid = pathToId.get(path);
-    if (!fid) {
-      fid = uid();
-      pathToId.set(path, fid);
-    }
-    // CRITICAL: ensure an actual folder node exists for this id. The id may be
-    // known from the folder index (_hades.json) written by another device, in
-    // which case no folder NoteFile exists yet locally. Without this, incoming
-    // notes get attached to a parentId that has no node → orphaned & invisible.
-    if (!notes.some((n) => n.id === fid && n.isFolder)) {
-      notes.push({
-        id: fid, name: parts[i], content: "", tags: [],
-        parentId, isFolder: true,
-        createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
-      });
-    }
-    parentId = fid;
-  }
-  return parentId;
-}
-
-export async function initialSync(
-  root: string,
-  localNotes: NoteFile[]
-): Promise<InitialSyncResult> {
+export async function fullSync(root: string, localNotes: NoteFile[]): Promise<FullSyncResult> {
   await mkdir(root, { recursive: true });
 
-  const index = await readFolderIndex(root);
-  const mdFiles: { full: string; parts: string[] }[] = [];
-  await collectMdFiles(root, [], mdFiles);
+  const store = useStore.getState();
+  const now = new Date().toISOString();
 
-  // First run: no disk notes — upload everything
-  if (mdFiles.length === 0) {
-    return { mergedNotes: localNotes, needsUploadCount: localNotes.filter(n => !n.isFolder).length };
-  }
+  // ── 1) Read manifest + walk disk ──────────────────────────────────────────
+  const manifest = await readManifest(root);
+  const files: DiskFile[] = [];
+  const diskDirs: string[] = [];
+  await walkDisk(root, [], files, diskDirs);
 
-  // Parse disk files
-  interface RawDisk {
-    id: string; name: string; content: string; tags: string[];
-    createdAt: string; updatedAt: string; folderParts: string[];
-  }
-
-  const diskNotes: RawDisk[] = [];
-  for (const { full, parts } of mdFiles) {
-    try {
-      const fm = parseFrontmatter(await readTextFile(full));
-      if (!fm) continue;
-      const filename = parts[parts.length - 1];
-      const m = /^(.+)-[a-z0-9]{6}\.md$/.exec(filename) ?? /^(.+)\.md$/.exec(filename);
-      diskNotes.push({ ...fm, name: m ? m[1] : filename.replace(/\.md$/, ""), folderParts: parts.slice(0, -1) });
-    } catch {}
-  }
-
-  // Build folder-path → id map. Local folders are authoritative (so a folder
-  // that already exists locally keeps its id and we don't create a duplicate);
-  // the on-disk index only fills in paths we don't have locally.
-  const pathToId = new Map<string, string>();
-  for (const f of localNotes.filter(n => n.isFolder)) {
-    const segs = [safeName(f.name)];
-    let pid = f.parentId;
-    while (pid) {
-      const p = localNotes.find(n => n.id === pid);
-      if (!p) break;
-      segs.unshift(safeName(p.name));
-      pid = p.parentId;
-    }
-    pathToId.set(segs.join("/"), f.id);
-  }
-  for (const [path, id] of Object.entries(index.folderIds)) {
-    if (!pathToId.has(path)) pathToId.set(path, id);
-  }
-
-  // Merge
-  const result: NoteFile[] = [...localNotes];
-  const diskIds = new Set(diskNotes.map(d => d.id));
-  let needsUploadCount = 0;
-
-  for (const disk of diskNotes) {
-    const parentId = resolveOrCreateFolderPath(disk.folderParts, pathToId, result);
-    const localIdx = result.findIndex(n => n.id === disk.id);
-
-    if (localIdx >= 0) {
-      const local = result[localIdx];
-      if (disk.updatedAt > local.updatedAt) {
-        // Disk is newer → update local
-        result[localIdx] = { ...local, name: disk.name, content: disk.content, tags: disk.tags, updatedAt: disk.updatedAt, parentId };
-      }
-      // else local is newer → will be uploaded at next sync
-    } else {
-      // New note from another device
-      result.push({
-        id: disk.id, name: disk.name, content: disk.content, tags: disk.tags,
-        parentId, isFolder: false, createdAt: disk.createdAt, updatedAt: disk.updatedAt,
-      });
+  // ── 2) Merge tombstones (local store ∪ manifest), drop ancient ones ───────
+  const tombstones: Record<string, string> = {};
+  const cutoff = Date.now() - TOMBSTONE_MAX_AGE_MS;
+  for (const src of [manifest.tombstones, store.deletedNoteIds]) {
+    for (const [id, deletedAt] of Object.entries(src)) {
+      const t = Date.parse(deletedAt);
+      if (!isNaN(t) && t < cutoff) continue;
+      if (!tombstones[id] || tombstones[id] < deletedAt) tombstones[id] = deletedAt;
     }
   }
+  const isTombstoned = (n: { id: string; updatedAt: string }) =>
+    tombstones[n.id] !== undefined && n.updatedAt <= tombstones[n.id];
 
-  // Count local-only notes that need uploading
+  // ── 3) Merge folders by id (manifest ↔ local, newer updatedAt wins) ───────
+  const merged = new Map<string, NoteFile>();
   for (const n of localNotes) {
-    if (!n.isFolder && !diskIds.has(n.id)) needsUploadCount++;
+    if (!isTombstoned(n)) merged.set(n.id, n);
+  }
+  for (const mf of manifest.folders) {
+    if (tombstones[mf.id] && (merged.get(mf.id)?.updatedAt ?? "") <= tombstones[mf.id]) continue;
+    const existing = merged.get(mf.id);
+    if (!existing) {
+      merged.set(mf.id, {
+        id: mf.id, name: mf.name, content: "", tags: [],
+        parentId: mf.parentId, isFolder: true,
+        createdAt: mf.updatedAt, updatedAt: mf.updatedAt,
+      });
+    } else if (existing.isFolder && mf.updatedAt > existing.updatedAt) {
+      merged.set(mf.id, { ...existing, name: mf.name, parentId: mf.parentId, updatedAt: mf.updatedAt });
+    }
   }
 
-  return { mergedNotes: result, needsUploadCount };
+  // Path → folder-id map (for resolving LEGACY files only). Built from merged
+  // folders; never overwritten by disk paths.
+  const folderPathToId = new Map<string, string>();
+  {
+    const byId = new Map([...merged].filter(([, n]) => n.isFolder));
+    for (const [, f] of byId) {
+      folderPathToId.set(folderRelDir(f, byId), f.id);
+    }
+  }
+
+  // Resolve a legacy file's folder path to a parent id, creating folder nodes
+  // only for genuinely unknown paths (one-time migration of pre-v2 layouts).
+  const resolveLegacyParent = (parts: string[]): string | null => {
+    let parentId: string | null = null;
+    for (let i = 0; i < parts.length; i++) {
+      const path = parts.slice(0, i + 1).join("/");
+      let fid = folderPathToId.get(path);
+      if (!fid) {
+        fid = uid();
+        folderPathToId.set(path, fid);
+        merged.set(fid, {
+          id: fid, name: parts[i], content: "", tags: [],
+          parentId, isFolder: true, createdAt: now, updatedAt: now,
+        });
+      }
+      parentId = fid;
+    }
+    return parentId;
+  };
+
+  // ── 4) Merge notes by id (newest updatedAt wins; dedup duplicate files) ───
+  // Group disk files by note id, keeping the newest copy as authoritative.
+  const diskById = new Map<string, DiskFile & { parsed: ParsedNote }>();
+  for (const f of files) {
+    if (!f.parsed) continue;
+    const prev = diskById.get(f.parsed.id);
+    if (!prev || f.parsed.updatedAt > prev.parsed.updatedAt) {
+      diskById.set(f.parsed.id, f as DiskFile & { parsed: ParsedNote });
+    }
+  }
+
+  for (const [id, file] of diskById) {
+    const p = file.parsed;
+    if (tombstones[id] && p.updatedAt <= tombstones[id]) continue; // deleted elsewhere
+
+    // Determine the incoming parentId.
+    let parentId: string | null;
+    if (p.hasParentField) {
+      parentId = p.parentId;
+      if (parentId && !merged.get(parentId)?.isFolder) {
+        // Folder not known yet (manifest still propagating through the cloud).
+        // Materialize a visible placeholder named after the on-disk dir so the
+        // note is never orphaned; the manifest entry will correct it by id.
+        const dirName = file.parts.length > 1 ? file.parts[file.parts.length - 2] : "Recovered";
+        merged.set(parentId, {
+          id: parentId, name: dirName, content: "", tags: [],
+          parentId: null, isFolder: true,
+          createdAt: new Date(0).toISOString(), updatedAt: new Date(0).toISOString(),
+        });
+      }
+    } else {
+      // Legacy file — folder comes from its on-disk location.
+      parentId = resolveLegacyParent(file.parts.slice(0, -1));
+    }
+
+    const name = p.name ?? nameFromFilename(file.parts[file.parts.length - 1]);
+    const existing = merged.get(id);
+    if (!existing) {
+      merged.set(id, {
+        id, name, content: p.content, tags: p.tags,
+        parentId, isFolder: false, createdAt: p.createdAt, updatedAt: p.updatedAt,
+      });
+    } else if (!existing.isFolder && p.updatedAt > existing.updatedAt) {
+      merged.set(id, { ...existing, name, content: p.content, tags: p.tags, parentId, updatedAt: p.updatedAt });
+    }
+  }
+
+  const mergedNotes = [...merged.values()];
+  const byId = new Map(mergedNotes.map(n => [n.id, n]));
+
+  // ── 5) PUSH: write notes whose disk copy is missing, stale, or mis-placed ─
+  const expectedNotePaths = new Map<string, string>(); // note id → expected rel path
+  for (const n of mergedNotes) {
+    if (!n.isFolder) expectedNotePaths.set(n.id, noteRelPath(n, byId));
+  }
+
+  // Ensure folder directories exist.
+  const expectedDirs = new Set<string>();
+  for (const n of mergedNotes) {
+    if (n.isFolder) expectedDirs.add(folderRelDir(n, byId));
+  }
+  for (const dir of expectedDirs) {
+    await mkdir(`${root}/${dir}`, { recursive: true });
+  }
+
+  const diskRelSet = new Set(files.map(f => f.rel));
+  for (const n of mergedNotes) {
+    if (n.isFolder) continue;
+    const expected = expectedNotePaths.get(n.id)!;
+    const diskCopy = diskById.get(n.id);
+    const needsWrite =
+      !diskCopy ||                                  // never uploaded
+      diskCopy.parsed.updatedAt < n.updatedAt ||    // local is newer
+      !diskRelSet.has(expected);                    // renamed/moved → new path
+    if (needsWrite) {
+      const dir = expected.split("/").slice(0, -1).join("/");
+      if (dir) await mkdir(`${root}/${dir}`, { recursive: true });
+      await writeTextFile(`${root}/${expected}`, serialize({ ...n, updatedAt: n.updatedAt }));
+    }
+  }
+
+  // ── 6) PRUNE: tombstoned files, stale-path duplicates, duplicate-id copies ─
+  for (const f of files) {
+    if (!f.parsed) continue; // never touch files we can't attribute
+    const id = f.parsed.id;
+    const expected = expectedNotePaths.get(id);
+    const shouldRemove =
+      (tombstones[id] !== undefined && !byId.has(id)) || // deleted note's file
+      (expected !== undefined && f.rel !== expected);    // stale rename/move or duplicate copy
+    if (shouldRemove) {
+      try { await remove(`${root}/${f.rel}`); } catch { /* already gone */ }
+    }
+  }
+
+  // Remove directories that no longer correspond to a live folder — only when
+  // they're empty (so we never destroy unknown user files).
+  const candidateDirs = diskDirs
+    .filter(d => !expectedDirs.has(d))
+    .sort((a, b) => b.split("/").length - a.split("/").length); // deepest first
+  for (const d of candidateDirs) {
+    try {
+      const entries = await readDir(`${root}/${d}`);
+      if (entries.length === 0) await remove(`${root}/${d}`);
+    } catch { /* already gone */ }
+  }
+
+  // ── 7) Manifest + tombstone bookkeeping ────────────────────────────────────
+  await writeManifest(root, mergedNotes, tombstones);
+  useStore.getState().setDeletedNoteIds(tombstones);
+
+  return { mergedNotes };
 }

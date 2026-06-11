@@ -1005,3 +1005,26 @@
 .prose-chat pre code { font-size: 12px; }
 .prose-chat blockquote { margin: 0 0 0.4em; padding: 0.3em 0.8em; }
 .prose-chat *:last-child { margin-bottom: 0; }
+
+/* Citation chips (F3) — clickable [Note: X] / [PDF: Y] in assistant answers */
+.citation {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2em;
+  padding: 0.05em 0.45em;
+  margin: 0 0.1em;
+  border-radius: 0.4em;
+  font-size: 0.82em;
+  font-weight: 500;
+  line-height: 1.4;
+  color: var(--accent, var(--color-foreground));
+  background: var(--accent-soft, var(--color-surface-hover));
+  border: 1px solid var(--color-border);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 120ms;
+}
+.citation:hover {
+  border-color: var(--color-border-active);
+  filter: brightness(1.08);
+}

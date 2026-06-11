@@ -1,11 +1,11 @@
 import { useEffect } from "react";
 import { useStore } from "../store/useStore";
-import { initialSync, syncDirtyNotes } from "../lib/noteSync";
+import { fullSync } from "../lib/noteSync";
 import type { NoteFile } from "../store/useStore";
 
-// Pull remote changes and push local changes on this cadence. Cloud providers
-// (Dropbox, iCloud, …) take their own time to land files on disk, so a tighter
-// interval mostly just reduces the window before we notice a landed change.
+// Reconcile with the sync folder on this cadence. fullSync is a complete
+// pull + push + prune and is idempotent, so running it with no changes is a
+// no-op apart from reading the folder.
 const SYNC_INTERVAL_MS = 30 * 1000;
 
 // Cheap signature so we only re-render the tree when something actually changed.
@@ -31,19 +31,11 @@ export function useSyncTimer() {
       st.setIsSyncing(true);
       st.setSyncError(null);
       try {
-        // 1) PULL: merge anything new/changed on disk (other devices) into state
-        const { mergedNotes } = await initialSync(folder, st.notes);
-        if (signature(mergedNotes) !== signature(st.notes)) {
-          st.applyMergedNotes(mergedNotes);
+        const { mergedNotes } = await fullSync(folder, st.notes);
+        if (signature(mergedNotes) !== signature(useStore.getState().notes)) {
+          useStore.getState().applyMergedNotes(mergedNotes);
         }
-
-        // 2) PUSH: write out locally-changed notes
-        const cur = useStore.getState();
-        if (cur.hasPendingChanges) {
-          await syncDirtyNotes(cur.notes, folder, cur.lastSyncAt);
-          cur.setHasPendingChanges(false);
-        }
-
+        useStore.getState().setHasPendingChanges(false);
         useStore.getState().setLastSyncAt(new Date().toISOString());
       } catch (e) {
         useStore.getState().setSyncError(e instanceof Error ? e.message : String(e));

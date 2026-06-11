@@ -33,7 +33,8 @@ import {
   listBindings,
 } from "../../lib/markdownDecorations";
 import { mathLiveDecorations } from "../../lib/mathDecorations";
-import { registerEditorInsert } from "../../lib/editorBridge";
+import { registerEditorView } from "../../lib/editorBridge";
+import { assistRewrite, type AssistAction } from "../../lib/noteAssist";
 
 interface Props {
   noteId: string;
@@ -68,8 +69,16 @@ const mdHighlightStyle = HighlightStyle.define([
   { tag: tags.processingInstruction, color: "var(--color-muted)" },
 ]);
 
+const ASSIST_ACTIONS: { id: AssistAction; label: string }[] = [
+  { id: "expand",   label: "Expand" },
+  { id: "condense", label: "Condense" },
+  { id: "rephrase", label: "Rephrase" },
+  { id: "continue", label: "Continue" },
+];
+
 export default function Editor({ noteId, content, onChange }: Props) {
   const isVimMode = useStore((s) => s.isVimMode);
+  const aiEnabled = useStore((s) => s.aiEnabled);
   const editorRef  = useRef<HTMLDivElement>(null);
   const viewRef    = useRef<EditorView | null>(null);
   const vimCompartment      = useRef(new Compartment());
@@ -77,6 +86,60 @@ export default function Editor({ noteId, content, onChange }: Props) {
   const onChangeRef = useRef(onChange);
   const [initError, setInitError] = useState<string | null>(null);
   const [fontSize, setFontSize] = useState(15);
+
+  // ── Inline writing assist (F7) ─────────────────────────────────────────────
+  const [assist, setAssist] = useState<{ from: number; to: number; x: number; y: number } | null>(null);
+  const [assistBusy, setAssistBusy] = useState<AssistAction | null>(null);
+  const [assistErr, setAssistErr] = useState<string | null>(null);
+  const assistTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const assistBusyRef = useRef(false);
+  const aiEnabledRef = useRef(aiEnabled);
+  useEffect(() => { aiEnabledRef.current = aiEnabled; }, [aiEnabled]);
+
+  function refreshAssistFromSelection() {
+    if (assistBusyRef.current) return;
+    const view = viewRef.current;
+    if (!view || !aiEnabledRef.current) { setAssist(null); return; }
+    const sel = view.state.selection.main;
+    if (sel.empty || view.state.sliceDoc(sel.from, sel.to).trim().length < 3) {
+      setAssist(null);
+      setAssistErr(null);
+      return;
+    }
+    const c = view.coordsAtPos(sel.from);
+    if (!c) { setAssist(null); return; }
+    setAssist({ from: sel.from, to: sel.to, x: c.left, y: c.top });
+  }
+
+  async function handleAssist(action: AssistAction) {
+    const view = viewRef.current;
+    if (!view || !assist || assistBusy) return;
+    setAssistBusy(action);
+    setAssistErr(null);
+    assistBusyRef.current = true;
+    try {
+      const text = view.state.sliceDoc(assist.from, assist.to);
+      const out = await assistRewrite(action, text);
+      if (action === "continue") {
+        const sep = /\s$/.test(text) ? "" : " ";
+        view.dispatch({
+          changes: { from: assist.to, insert: sep + out },
+          scrollIntoView: true,
+        });
+      } else {
+        view.dispatch({
+          changes: { from: assist.from, to: assist.to, insert: out },
+          scrollIntoView: true,
+        });
+      }
+      setAssist(null);
+    } catch (e) {
+      setAssistErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setAssistBusy(null);
+      assistBusyRef.current = false;
+    }
+  }
 
   useEffect(() => { onChangeRef.current = onChange; }, [onChange]);
 
@@ -173,6 +236,11 @@ export default function Editor({ noteId, content, onChange }: Props) {
 
       const updateListener = EditorView.updateListener.of((update) => {
         if (update.docChanged) onChangeRef.current(update.state.doc.toString());
+        if (update.selectionSet || update.docChanged) {
+          // Debounce so the popover appears after the drag settles, not during.
+          if (assistTimer.current) clearTimeout(assistTimer.current);
+          assistTimer.current = setTimeout(refreshAssistFromSelection, 250);
+        }
       });
 
       const state = EditorState.create({
@@ -242,17 +310,8 @@ export default function Editor({ noteId, content, onChange }: Props) {
       const view = new EditorView({ state, parent: editorRef.current });
       viewRef.current = view;
 
-      // Let other components (e.g. the Calculator) insert at the cursor.
-      registerEditorInsert((text: string) => {
-        const sel = view.state.selection.main;
-        view.dispatch({
-          changes: { from: sel.from, to: sel.to, insert: text },
-          selection: { anchor: sel.from + text.length },
-          scrollIntoView: true,
-        });
-        view.focus();
-        return true;
-      });
+      // Let other components (Calculator, AI assists) read/edit via the bridge.
+      registerEditorView(view);
 
       // Focus the editor on mount
       setTimeout(() => view.focus(), 0);
@@ -261,7 +320,7 @@ export default function Editor({ noteId, content, onChange }: Props) {
     }
 
     return () => {
-      registerEditorInsert(null);
+      registerEditorView(null);
       viewRef.current?.destroy();
       viewRef.current = null;
     };
@@ -292,10 +351,45 @@ export default function Editor({ noteId, content, onChange }: Props) {
   }
 
   return (
-    <div
-      ref={editorRef}
-      className="absolute inset-0 overflow-hidden"
-      onKeyDown={handleKeyDown}
-    />
+    <>
+      <div
+        ref={editorRef}
+        className="absolute inset-0 overflow-hidden"
+        onKeyDown={handleKeyDown}
+      />
+
+      {/* Inline writing assist popover (F7) */}
+      {assist && aiEnabled && (
+        <div
+          className="fixed z-50 surface shadow-xl px-1 py-1 flex items-center gap-0.5"
+          style={{
+            left: Math.max(8, Math.min(assist.x, window.innerWidth - 320)),
+            top: Math.max(8, assist.y - 42),
+          }}
+          // Keep the editor selection alive while interacting with the popover.
+          onMouseDown={(e) => e.preventDefault()}
+        >
+          {ASSIST_ACTIONS.map(({ id, label }) => (
+            <button
+              key={id}
+              onClick={() => handleAssist(id)}
+              disabled={assistBusy !== null}
+              className={`px-2 py-1 rounded text-xs font-medium transition-all
+                          ${assistBusy === id
+                            ? "bg-surface-hover text-foreground"
+                            : "text-foreground-secondary hover:text-foreground hover:bg-surface-hover"
+                          } disabled:opacity-60`}
+            >
+              {assistBusy === id ? `${label}…` : label}
+            </button>
+          ))}
+          {assistErr && (
+            <span className="px-2 text-xs text-red-400 max-w-[240px] truncate" title={assistErr}>
+              {assistErr}
+            </span>
+          )}
+        </div>
+      )}
+    </>
   );
 }

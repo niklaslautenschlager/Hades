@@ -12,6 +12,9 @@ import {
   PanelLeftOpen,
   Calculator as CalcIcon,
   MoreHorizontal,
+  Layers,
+  Wand2,
+  Loader2,
 } from "lucide-react";
 import { AnimatePresence } from "framer-motion";
 import { useShallow } from "zustand/react/shallow";
@@ -21,9 +24,13 @@ import LibraryPanel from "./LibraryPanel";
 import Editor from "./Editor";
 import PdfViewer from "./PdfViewer";
 import Calculator from "./Calculator";
+import RelatedNotes from "./RelatedNotes";
 import { exportAsMarkdown, exportAsPdf } from "../../lib/noteExport";
 import { importObsidianVault } from "../../lib/noteImport";
 import { indexNote } from "../../lib/ragIndex";
+import { generateFlashcardsFromText } from "../../lib/flashcardGen";
+import { tidyNote } from "../../lib/noteAssist";
+import { replaceAll, hasActiveEditor } from "../../lib/editorBridge";
 
 export default function NotepadModule() {
   const {
@@ -38,6 +45,7 @@ export default function NotepadModule() {
     importNotes,
     showNotepadPdf,
     toggleNotepadPdf,
+    aiEnabled,
   } = useStore(
     useShallow((s) => ({
       notes: s.notes,
@@ -51,6 +59,7 @@ export default function NotepadModule() {
       importNotes: s.importNotes,
       showNotepadPdf: s.showNotepadPdf,
       toggleNotepadPdf: s.toggleNotepadPdf,
+      aiEnabled: s.aiEnabled,
     }))
   );
 
@@ -154,6 +163,47 @@ export default function NotepadModule() {
     const imported = await importObsidianVault();
     if (imported && imported.length > 0) importNotes(imported);
     setShowOverflow(false);
+  }
+
+  // ── AI actions (F1 generate flashcards, F5 tidy note) ─────────────────────
+  const [aiBusy, setAiBusy] = useState<null | "cards" | "tidy">(null);
+  const [aiMsg, setAiMsg] = useState<string | null>(null);
+
+  function flashMsg(msg: string) {
+    setAiMsg(msg);
+    setTimeout(() => setAiMsg(null), 6000);
+  }
+
+  async function handleGenerateFlashcards() {
+    if (!activeNote || aiBusy) return;
+    setShowOverflow(false);
+    setAiBusy("cards");
+    try {
+      const { deckName, added } = await generateFlashcardsFromText(activeNote.name, activeNote.content);
+      flashMsg(`Added ${added} card${added === 1 ? "" : "s"} to "${deckName}". Review them in Flashcards.`);
+    } catch (e) {
+      flashMsg(e instanceof Error ? e.message : String(e));
+    } finally {
+      setAiBusy(null);
+    }
+  }
+
+  async function handleTidyNote() {
+    if (!activeNote || aiBusy) return;
+    setShowOverflow(false);
+    setAiBusy("tidy");
+    try {
+      const cleaned = await tidyNote(activeNote.content);
+      // Prefer the editor so the change is undoable with Cmd/Ctrl-Z.
+      if (!hasActiveEditor() || !replaceAll(cleaned)) {
+        updateNote(activeNote.id, { content: cleaned });
+      }
+      flashMsg("Note tidied — press Cmd/Ctrl-Z to undo.");
+    } catch (e) {
+      flashMsg(e instanceof Error ? e.message : String(e));
+    } finally {
+      setAiBusy(null);
+    }
   }
 
   return (
@@ -377,6 +427,34 @@ export default function NotepadModule() {
                         <FileUp className="w-3 h-3" />
                         Import vault
                       </button>
+
+                      {/* AI actions */}
+                      {aiEnabled && (
+                        <>
+                          <div className="border-t border-border my-1" />
+                          <div className="px-3 py-1">
+                            <span className="text-xs text-muted font-medium uppercase tracking-wider">AI</span>
+                          </div>
+                          <button
+                            onClick={handleGenerateFlashcards}
+                            disabled={aiBusy !== null}
+                            className="flex items-center gap-2 w-full px-3 py-1.5 text-xs text-foreground-secondary
+                                       hover:bg-surface-hover transition-colors disabled:opacity-50"
+                          >
+                            {aiBusy === "cards" ? <Loader2 className="w-3 h-3 animate-spin" /> : <Layers className="w-3 h-3" />}
+                            Generate flashcards
+                          </button>
+                          <button
+                            onClick={handleTidyNote}
+                            disabled={aiBusy !== null}
+                            className="flex items-center gap-2 w-full px-3 py-1.5 text-xs text-foreground-secondary
+                                       hover:bg-surface-hover transition-colors disabled:opacity-50"
+                          >
+                            {aiBusy === "tidy" ? <Loader2 className="w-3 h-3 animate-spin" /> : <Wand2 className="w-3 h-3" />}
+                            Tidy &amp; format
+                          </button>
+                        </>
+                      )}
                     </div>
                   )}
                 </div>
@@ -405,6 +483,9 @@ export default function NotepadModule() {
                 onChange={handleContentChange}
               />
             </div>
+
+            {/* Related-note wikilink suggestions (F6) */}
+            <RelatedNotes noteId={activeNote.id} content={activeNote.content} />
 
             {/* Vim status bar */}
             {isVimMode && (
@@ -437,6 +518,17 @@ export default function NotepadModule() {
       <AnimatePresence>
         {showCalculator && <Calculator onClose={() => setShowCalculator(false)} />}
       </AnimatePresence>
+
+      {/* ── AI action toast ─────────────────────────────────────────────────── */}
+      {(aiMsg || aiBusy) && (
+        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 px-4 py-2 surface shadow-xl
+                        flex items-center gap-2 max-w-md">
+          {aiBusy && <Loader2 className="w-3.5 h-3.5 animate-spin text-muted flex-shrink-0" />}
+          <span className="text-xs text-foreground-secondary">
+            {aiBusy === "cards" ? "Generating flashcards…" : aiBusy === "tidy" ? "Tidying note…" : aiMsg}
+          </span>
+        </div>
+      )}
 
       {/* ── PDF Viewer (resizable) ───────────────────────────────────────────── */}
       {showNotepadPdf && (

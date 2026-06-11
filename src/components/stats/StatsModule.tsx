@@ -4,6 +4,7 @@ import { motion } from "framer-motion";
 import { useShallow } from "zustand/react/shallow";
 import { useStore } from "../../store/useStore";
 import type { FocusSession } from "../../store/useStore";
+import WeeklyReviewCard from "./WeeklyReviewCard";
 
 function formatDuration(seconds: number): string {
   const h = Math.floor(seconds / 3600);
@@ -173,6 +174,9 @@ export default function StatsModule() {
             weeklyGoalHours={weeklyGoalHours}
             setWeeklyGoalHours={setWeeklyGoalHours}
           />
+
+          {/* AI weekly review (F13) */}
+          <WeeklyReviewCard />
 
           {/* Stat cards */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
