@@ -17,6 +17,12 @@ function relPath(id: string): string {
   return `library/${id}.pdf`;
 }
 
+// Hidden extracted-text cache, so the AI can read a PDF's content cheaply
+// (and accurately) without re-running pdf.js every time.
+function textRelPath(id: string): string {
+  return `library/${id}.txt`;
+}
+
 // ── Metadata ───────────────────────────────────────────────────────────────
 
 interface PdfMeta {
@@ -84,6 +90,15 @@ async function importPdfBytes(bytes: Uint8Array, fileName: string): Promise<Libr
 
   const meta = await extractMetadata(bytes);
 
+  // Extract + cache the full text now (hidden) so AI features are instant.
+  try {
+    const text = await extractPdfText(bytes);
+    await invoke("app_data_write", {
+      relPath: textRelPath(id),
+      contents: Array.from(new TextEncoder().encode(text)),
+    });
+  } catch { /* best-effort */ }
+
   return {
     id,
     title: meta.title || titleFromFileName(fileName),
@@ -122,12 +137,31 @@ export async function libraryDocBlobUrl(doc: LibraryDoc): Promise<string> {
   return URL.createObjectURL(blob);
 }
 
+/** The hidden extracted text for a doc — from cache, extracting on a miss. */
+export async function libraryDocText(doc: LibraryDoc): Promise<string> {
+  try {
+    const buf = await invoke<ArrayBuffer>("app_data_read", { relPath: textRelPath(doc.id) });
+    const text = new TextDecoder().decode(new Uint8Array(buf));
+    if (text.trim()) return text;
+  } catch { /* cache miss */ }
+  const text = await extractPdfText(await libraryDocBytes(doc));
+  try {
+    await invoke("app_data_write", {
+      relPath: textRelPath(doc.id),
+      contents: Array.from(new TextEncoder().encode(text)),
+    });
+  } catch { /* ignore */ }
+  return text;
+}
+
 /** Delete the stored file. Missing file is not an error. */
 export async function deleteLibraryFile(doc: LibraryDoc): Promise<void> {
-  try {
-    await invoke("app_data_remove", { relPath: relPath(doc.id) });
-  } catch {
-    /* already gone — ignore */
+  for (const rp of [relPath(doc.id), textRelPath(doc.id)]) {
+    try {
+      await invoke("app_data_remove", { relPath: rp });
+    } catch {
+      /* already gone — ignore */
+    }
   }
 }
 

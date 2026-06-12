@@ -25,12 +25,22 @@ import Editor from "./Editor";
 import PdfViewer from "./PdfViewer";
 import Calculator from "./Calculator";
 import RelatedNotes from "./RelatedNotes";
+import DeletionUndoToast from "./DeletionUndoToast";
 import { exportAsMarkdown, exportAsPdf } from "../../lib/noteExport";
 import { importObsidianVault } from "../../lib/noteImport";
 import { indexNote } from "../../lib/ragIndex";
 import { generateFlashcardsFromText } from "../../lib/flashcardGen";
 import { tidyNote } from "../../lib/noteAssist";
-import { replaceAll, hasActiveEditor } from "../../lib/editorBridge";
+import { replaceAll, hasActiveEditor, insertIntoActiveNote } from "../../lib/editorBridge";
+
+const INSERT_SNIPPETS: { label: string; snippet: string }[] = [
+  { label: "Table", snippet: "\n| Column | Column |\n| --- | --- |\n| Cell | Cell |\n" },
+  { label: "Code block", snippet: "\n```\n\n```\n" },
+  { label: "Quote", snippet: "\n> " },
+  { label: "Divider", snippet: "\n---\n" },
+  { label: "Footnote", snippet: "[^1]\n\n[^1]: " },
+  { label: "Task list", snippet: "\n- [ ] " },
+];
 
 export default function NotepadModule() {
   const {
@@ -418,6 +428,25 @@ export default function NotepadModule() {
 
                       <div className="border-t border-border my-1" />
 
+                      {/* Insert */}
+                      <div className="px-3 py-1">
+                        <span className="text-xs text-muted font-medium uppercase tracking-wider">Insert</span>
+                      </div>
+                      <div className="flex flex-wrap gap-1 px-3 pb-1.5">
+                        {INSERT_SNIPPETS.map((s) => (
+                          <button
+                            key={s.label}
+                            onClick={() => { insertIntoActiveNote(s.snippet); setShowOverflow(false); }}
+                            className="px-2 py-0.5 rounded border border-border text-xs text-foreground-secondary
+                                       hover:bg-surface-hover hover:text-foreground transition-colors"
+                          >
+                            {s.label}
+                          </button>
+                        ))}
+                      </div>
+
+                      <div className="border-t border-border my-1" />
+
                       {/* Import */}
                       <button
                         onClick={handleImport}
@@ -518,6 +547,9 @@ export default function NotepadModule() {
       <AnimatePresence>
         {showCalculator && <Calculator onClose={() => setShowCalculator(false)} />}
       </AnimatePresence>
+
+      {/* Undo toast for tree deletions */}
+      <DeletionUndoToast />
 
       {/* ── AI action toast ─────────────────────────────────────────────────── */}
       {(aiMsg || aiBusy) && (

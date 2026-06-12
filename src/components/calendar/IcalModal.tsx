@@ -28,13 +28,19 @@ export default function IcalModal({ onClose }: Props) {
 
   function handleAdd() {
     if (!name.trim() || !url.trim()) return;
-    addIcalFeed({ name: name.trim(), url: url.trim(), color, enabled: true });
+    const fname = name.trim();
+    const furl = url.trim();
+    addIcalFeed({ name: fname, url: furl, color, enabled: true });
     setName("");
     setUrl("");
+    // Pull the feed immediately so its events show up without a manual sync.
+    const added = useStore.getState().icalFeeds.find((f) => f.url === furl && f.name === fname);
+    if (added) void handleSync(added.id);
   }
 
   async function handleSync(feedId: string) {
-    const feed = icalFeeds.find((f) => f.id === feedId);
+    // Read from the store (not the closure) so a just-added feed is found.
+    const feed = useStore.getState().icalFeeds.find((f) => f.id === feedId);
     if (!feed) return;
 
     setSyncing((s) => ({ ...s, [feedId]: true }));

@@ -13,12 +13,26 @@ function occurrenceId(uid: string, startIso: string): string {
   return `ical-${uid}-${startIso}`;
 }
 
+/** Calendar share links are often `webcal://…` — fetch them over https. */
+function normalizeFeedUrl(url: string): string {
+  const u = url.trim();
+  if (/^webcal:\/\//i.test(u)) return u.replace(/^webcal:\/\//i, "https://");
+  return u;
+}
+
 export async function fetchAndParseIcal(feed: IcalFeed): Promise<CalendarEvent[]> {
   let raw: string;
   try {
-    raw = await invoke<string>("fetch_ical", { url: feed.url });
+    raw = await invoke<string>("fetch_ical", { url: normalizeFeedUrl(feed.url) });
   } catch (err) {
-    throw new Error(`Failed to fetch iCal feed "${feed.name}": ${String(err)}`);
+    const msg = String(err);
+    // Give a friendlier hint for the common failure modes.
+    const hint = /HTTP 5\d\d/.test(msg)
+      ? " The calendar server returned an error — check the URL is a direct .ics link (not a web page) and is publicly accessible."
+      : /HTTP 4\d\d/.test(msg)
+      ? " The link was rejected (404/403) — it may be private or expired. Re-copy the 'secret'/'iCal' export URL."
+      : "";
+    throw new Error(`Couldn't load "${feed.name}": ${msg}.${hint}`);
   }
 
   const jcal = ICAL.parse(raw);

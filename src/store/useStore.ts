@@ -218,6 +218,14 @@ interface AppState {
   setShowWeekNumbers: (v: boolean) => void;
   weekStartsOn: 0 | 1; // Sunday or Monday
   setWeekStartsOn: (v: 0 | 1) => void;
+  // Event reminders (in-app)
+  remindersEnabled: boolean;
+  setRemindersEnabled: (v: boolean) => void;
+  reminderLeadMinutes: number;          // how many minutes before an event
+  setReminderLeadMinutes: (v: number) => void;
+  // First-launch onboarding
+  onboardingSeen: boolean;
+  setOnboardingSeen: (v: boolean) => void;
 
   // ── Pomodoro ──────────────────────────────────────────────────────────────
   pomodoroMode: PomodoroMode;
@@ -297,13 +305,21 @@ interface AppState {
   setFolderExpanded: (id: string, open: boolean) => void;
   notePdfUrl: string | null;
   notePdfFileName: string;
-  setNotePdf: (url: string | null, fileName: string) => void;
+  notePdfDocId: string | null;   // LibraryDoc id when the open PDF is from the library
+  setNotePdf: (url: string | null, fileName: string, docId?: string | null) => void;
+  // Remembered page per PDF (keyed by doc id or filename) so it restores on return.
+  pdfPages: Record<string, number>;
+  setPdfPage: (key: string, page: number) => void;
 
   addNote: (parentId?: string | null) => string;
   addFolder: (parentId?: string | null) => void;
   updateNote: (id: string, patch: Partial<NoteFile>) => void;
   deleteNote: (id: string) => void;
   moveNote: (id: string, newParentId: string | null) => void;
+  // Undo for the most recent tree deletion (Cmd/Ctrl-Z in Notes).
+  lastDeletedNotes: NoteFile[] | null;
+  restoreLastDeletion: () => void;
+  clearDeletionUndo: () => void;
   setActiveNote: (id: string | null) => void;
   toggleVimMode: () => void;
   toggleNotepadPdf: () => void;
@@ -475,6 +491,12 @@ export const useStore = create<AppState>()(
       setShowWeekNumbers: (showWeekNumbers) => set({ showWeekNumbers }),
       weekStartsOn: 1,
       setWeekStartsOn: (weekStartsOn) => set({ weekStartsOn }),
+      remindersEnabled: true,
+      setRemindersEnabled: (remindersEnabled) => set({ remindersEnabled }),
+      reminderLeadMinutes: 10,
+      setReminderLeadMinutes: (reminderLeadMinutes) => set({ reminderLeadMinutes }),
+      onboardingSeen: false,
+      setOnboardingSeen: (onboardingSeen) => set({ onboardingSeen }),
 
       // ── Pomodoro ────────────────────────────────────────────────────────
       pomodoroMode: "work",
@@ -813,7 +835,12 @@ export const useStore = create<AppState>()(
       // ── Notes ───────────────────────────────────────────────────────────
       notePdfUrl: null,
       notePdfFileName: "",
-      setNotePdf: (url, fileName) => set({ notePdfUrl: url, notePdfFileName: fileName }),
+      notePdfDocId: null,
+      setNotePdf: (url, fileName, docId = null) =>
+        set({ notePdfUrl: url, notePdfFileName: fileName, notePdfDocId: docId }),
+      pdfPages: {},
+      setPdfPage: (key, page) =>
+        set((s) => (s.pdfPages[key] === page ? {} : { pdfPages: { ...s.pdfPages, [key]: page } })),
 
       notes: [
         {
@@ -918,14 +945,37 @@ export const useStore = create<AppState>()(
             for (const did of toDelete) deletedNoteIds[did] = now;
           }
 
+          // Snapshot the removed subtree so the delete can be undone.
+          const removed = s.notes.filter((n) => toDelete.has(n.id));
+
           return {
             notes: s.notes.filter((n) => !toDelete.has(n.id)),
             openNoteIds,
             activeNoteId,
             deletedNoteIds,
+            lastDeletedNotes: removed,
             hasPendingChanges: s.syncEnabled ? true : s.hasPendingChanges,
           };
         }),
+      lastDeletedNotes: null,
+      restoreLastDeletion: () =>
+        set((s) => {
+          if (!s.lastDeletedNotes || s.lastDeletedNotes.length === 0) return {};
+          const restoreIds = new Set(s.lastDeletedNotes.map((n) => n.id));
+          // Lift the tombstones so the restored notes don't get pruned on sync.
+          const deletedNoteIds = { ...s.deletedNoteIds };
+          for (const id of restoreIds) delete deletedNoteIds[id];
+          // Re-open the first restored note (if it's a note) for context.
+          const firstNote = s.lastDeletedNotes.find((n) => !n.isFolder);
+          return {
+            notes: [...s.notes, ...s.lastDeletedNotes],
+            deletedNoteIds,
+            lastDeletedNotes: null,
+            activeNoteId: firstNote ? firstNote.id : s.activeNoteId,
+            hasPendingChanges: s.syncEnabled ? true : s.hasPendingChanges,
+          };
+        }),
+      clearDeletionUndo: () => set({ lastDeletedNotes: null }),
       moveNote: (id, newParentId) =>
         set((s) => ({
           notes: s.notes.map((n) =>
@@ -1350,7 +1400,7 @@ export const useStore = create<AppState>()(
     }),
     {
       name: "hades-store",
-      version: 7,
+      version: 10,
       migrate: (persisted: any, version) => {
         if (!persisted) return persisted;
         if (version < 2) {
@@ -1430,6 +1480,17 @@ export const useStore = create<AppState>()(
           if (!("sessionReflectionEnabled" in persisted)) persisted.sessionReflectionEnabled = true;
           if (!Array.isArray(persisted.focusReflections)) persisted.focusReflections = [];
         }
+        if (version < 8) {
+          if (!("remindersEnabled" in persisted)) persisted.remindersEnabled = true;
+          if (!("reminderLeadMinutes" in persisted)) persisted.reminderLeadMinutes = 10;
+        }
+        if (version < 9) {
+          if (!persisted.pdfPages || typeof persisted.pdfPages !== "object") persisted.pdfPages = {};
+        }
+        if (version < 10) {
+          // Existing users have already learned the app — don't show onboarding.
+          if (!("onboardingSeen" in persisted)) persisted.onboardingSeen = true;
+        }
         return persisted;
       },
       partialize: (s) => ({
@@ -1439,9 +1500,11 @@ export const useStore = create<AppState>()(
         timerEndsAt: null,
         taskFinishPrompt: null,
         assistantSeed: null,
+        lastDeletedNotes: null,
         isChatLoading: false,
         notePdfUrl: null,
         notePdfFileName: "",
+        notePdfDocId: null,
         // Ephemeral sync runtime — always reset on start
         isSyncing: false,
         hasPendingChanges: false,

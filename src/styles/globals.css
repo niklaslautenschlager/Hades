@@ -964,14 +964,12 @@
     text-shadow:
       0 0 6px var(--accent-glow),
       0 0 14px var(--accent-soft);
-    letter-spacing: 0;
   }
   50% {
     text-shadow:
       0 0 12px var(--accent-glow),
       0 0 22px var(--accent-glow),
       0 0 32px var(--accent-soft);
-    letter-spacing: 0.01em;
   }
 }
 

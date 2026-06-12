@@ -5,16 +5,18 @@ import { invoke } from "@tauri-apps/api/core";
 import { readFile } from "@tauri-apps/plugin-fs";
 import { useShallow } from "zustand/react/shallow";
 import { useStore } from "../../store/useStore";
+import PdfCanvas from "./PdfCanvas";
 
 interface Props {
   onClose: () => void;
 }
 
 export default function PdfViewer({ onClose }: Props) {
-  const { pdfUrl, fileName, setNotePdf } = useStore(
+  const { pdfUrl, fileName, docId, setNotePdf } = useStore(
     useShallow((s) => ({
       pdfUrl: s.notePdfUrl,
       fileName: s.notePdfFileName,
+      docId: s.notePdfDocId,
       setNotePdf: s.setNotePdf,
     }))
   );
@@ -26,8 +28,6 @@ export default function PdfViewer({ onClose }: Props) {
   const [urlError, setUrlError]       = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
   const urlInputRef = useRef<HTMLInputElement>(null);
-  // Track whether mouse is over the iframe area so pointer-events work correctly
-  const [iframeActive, setIframeActive] = useState(false);
 
   function loadFromBlob(blob: Blob, name: string) {
     if (pdfUrl) URL.revokeObjectURL(pdfUrl);
@@ -163,30 +163,9 @@ export default function PdfViewer({ onClose }: Props) {
         </div>
       )}
 
-      {/* Content */}
+      {/* Content — PDF.js renderer remembers the page across tab/module switches */}
       {pdfUrl ? (
-        <div
-          className="flex-1 min-h-0 relative"
-          onMouseEnter={() => setIframeActive(true)}
-          onMouseLeave={() => setIframeActive(false)}
-        >
-          <iframe
-            key={pdfUrl}
-            src={`${pdfUrl}#toolbar=1&navpanes=0&statusbar=0`}
-            className="w-full h-full border-none"
-            title="PDF Viewer"
-            loading="lazy"
-            style={{
-              // When mouse leaves the PDF panel, disable pointer capture so the
-              // editor gets events back immediately (fixes the WebKit sticky-hover bug)
-              pointerEvents: iframeActive ? "auto" : "none",
-            }}
-          />
-          {/* Transparent overlay restores pointer events to the editor when not hovering */}
-          {!iframeActive && (
-            <div className="absolute inset-0 pointer-events-none" />
-          )}
-        </div>
+        <PdfCanvas key={pdfUrl} url={pdfUrl} storageKey={docId ?? fileName ?? pdfUrl} />
       ) : (
         <div
           className={`flex-1 flex flex-col items-center justify-center gap-4 p-8

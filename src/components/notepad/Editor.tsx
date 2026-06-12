@@ -34,7 +34,8 @@ import {
 } from "../../lib/markdownDecorations";
 import { mathLiveDecorations } from "../../lib/mathDecorations";
 import { registerEditorView } from "../../lib/editorBridge";
-import { assistRewrite, type AssistAction } from "../../lib/noteAssist";
+import { assistRewrite, verifyAgainstSource, translateText, askRewrite, type AssistAction } from "../../lib/noteAssist";
+import { libraryDocText } from "../../lib/pdfLibrary";
 
 interface Props {
   noteId: string;
@@ -79,6 +80,24 @@ const ASSIST_ACTIONS: { id: AssistAction; label: string }[] = [
 export default function Editor({ noteId, content, onChange }: Props) {
   const isVimMode = useStore((s) => s.isVimMode);
   const aiEnabled = useStore((s) => s.aiEnabled);
+  const notePdfDocId = useStore((s) => s.notePdfDocId);
+  const pdfTextRef = useRef<{ id: string; text: string } | null>(null);
+
+  // Lazily load (and cache) the hidden text of the PDF currently in the viewer.
+  async function getOpenPdfText(): Promise<string> {
+    const id = notePdfDocId;
+    if (!id) return "";
+    if (pdfTextRef.current?.id === id) return pdfTextRef.current.text;
+    const doc = useStore.getState().libraryDocs.find((d) => d.id === id);
+    if (!doc) return "";
+    try {
+      const text = await libraryDocText(doc);
+      pdfTextRef.current = { id, text };
+      return text;
+    } catch {
+      return "";
+    }
+  }
   const editorRef  = useRef<HTMLDivElement>(null);
   const viewRef    = useRef<EditorView | null>(null);
   const vimCompartment      = useRef(new Compartment());
@@ -91,6 +110,9 @@ export default function Editor({ noteId, content, onChange }: Props) {
   const [assist, setAssist] = useState<{ from: number; to: number; x: number; y: number } | null>(null);
   const [assistBusy, setAssistBusy] = useState<AssistAction | null>(null);
   const [assistErr, setAssistErr] = useState<string | null>(null);
+  // Secondary input row for "Translate" / "Ask AI".
+  const [inputMode, setInputMode] = useState<null | "translate" | "ask">(null);
+  const [inputValue, setInputValue] = useState("");
   const assistTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const assistBusyRef = useRef(false);
   const aiEnabledRef = useRef(aiEnabled);
@@ -119,7 +141,9 @@ export default function Editor({ noteId, content, onChange }: Props) {
     assistBusyRef.current = true;
     try {
       const text = view.state.sliceDoc(assist.from, assist.to);
-      const out = await assistRewrite(action, text);
+      // Expand / continue use the open PDF as source context when one is open.
+      const ctx = action === "expand" || action === "continue" ? await getOpenPdfText() : "";
+      const out = await assistRewrite(action, text, ctx || undefined);
       if (action === "continue") {
         const sep = /\s$/.test(text) ? "" : " ";
         view.dispatch({
@@ -140,6 +164,65 @@ export default function Editor({ noteId, content, onChange }: Props) {
       assistBusyRef.current = false;
     }
   }
+
+  // Check the selection against the open PDF: correct/expand it, or leave it.
+  async function handleVerify() {
+    const view = viewRef.current;
+    if (!view || !assist || assistBusy) return;
+    setAssistBusy("expand"); // reuse busy flag for the spinner
+    setAssistErr(null);
+    assistBusyRef.current = true;
+    try {
+      const text = view.state.sliceDoc(assist.from, assist.to);
+      const src = await getOpenPdfText();
+      if (!src.trim()) {
+        setAssistErr("That PDF has no extractable text.");
+        return;
+      }
+      const { ok, text: result } = await verifyAgainstSource(text, src);
+      if (!ok && result.trim() && result.trim() !== text.trim()) {
+        view.dispatch({ changes: { from: assist.from, to: assist.to, insert: result }, scrollIntoView: true });
+        setAssist(null);
+      } else {
+        setAssistErr("Looks accurate — no changes.");
+        setTimeout(() => setAssistErr(null), 2500);
+      }
+    } catch (e) {
+      setAssistErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setAssistBusy(null);
+      assistBusyRef.current = false;
+    }
+  }
+
+  // Run a Translate / Ask-AI request from the secondary input row.
+  async function runInput() {
+    const view = viewRef.current;
+    if (!view || !assist || assistBusy || !inputValue.trim() || !inputMode) return;
+    setAssistBusy("rephrase"); // reuse busy flag for the spinner
+    setAssistErr(null);
+    assistBusyRef.current = true;
+    try {
+      const text = view.state.sliceDoc(assist.from, assist.to);
+      const out = inputMode === "translate"
+        ? await translateText(text, inputValue.trim())
+        : await askRewrite(text, inputValue.trim());
+      if (out.trim()) {
+        view.dispatch({ changes: { from: assist.from, to: assist.to, insert: out }, scrollIntoView: true });
+        setAssist(null);
+      }
+      setInputMode(null);
+      setInputValue("");
+    } catch (e) {
+      setAssistErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setAssistBusy(null);
+      assistBusyRef.current = false;
+    }
+  }
+
+  // Reset the input row whenever the popover target changes/closes.
+  useEffect(() => { if (!assist) { setInputMode(null); setInputValue(""); } }, [assist]);
 
   useEffect(() => { onChangeRef.current = onChange; }, [onChange]);
 
@@ -342,6 +425,13 @@ export default function Editor({ noteId, content, onChange }: Props) {
     }
   }
 
+  // Ctrl/Cmd + scroll wheel to zoom the note text in/out.
+  function handleWheel(e: React.WheelEvent) {
+    if (!(e.ctrlKey || e.metaKey)) return;
+    e.preventDefault();
+    setFontSize((f) => Math.max(10, Math.min(28, f - Math.sign(e.deltaY))));
+  }
+
   if (initError) {
     return (
       <div className="flex-1 flex items-center justify-center text-sm text-red-400 p-8">
@@ -356,35 +446,91 @@ export default function Editor({ noteId, content, onChange }: Props) {
         ref={editorRef}
         className="absolute inset-0 overflow-hidden"
         onKeyDown={handleKeyDown}
+        onWheel={handleWheel}
       />
 
       {/* Inline writing assist popover (F7) */}
       {assist && aiEnabled && (
         <div
-          className="fixed z-50 surface shadow-xl px-1 py-1 flex items-center gap-0.5"
+          className="fixed z-50 surface shadow-xl p-1 flex flex-col gap-1"
           style={{
-            left: Math.max(8, Math.min(assist.x, window.innerWidth - 320)),
+            left: Math.max(8, Math.min(assist.x, window.innerWidth - 380)),
             top: Math.max(8, assist.y - 42),
           }}
-          // Keep the editor selection alive while interacting with the popover.
-          onMouseDown={(e) => e.preventDefault()}
         >
-          {ASSIST_ACTIONS.map(({ id, label }) => (
+          <div className="flex items-center gap-0.5 flex-wrap">
+            {ASSIST_ACTIONS.map(({ id, label }) => (
+              <button
+                key={id}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => handleAssist(id)}
+                disabled={assistBusy !== null}
+                className={`px-2 py-1 rounded text-xs font-medium transition-all
+                            ${assistBusy === id
+                              ? "bg-surface-hover text-foreground"
+                              : "text-foreground-secondary hover:text-foreground hover:bg-surface-hover"
+                            } disabled:opacity-60`}
+              >
+                {assistBusy === id ? `${label}…` : label}
+              </button>
+            ))}
             <button
-              key={id}
-              onClick={() => handleAssist(id)}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => { setInputMode((m) => (m === "translate" ? null : "translate")); setAssistErr(null); }}
               disabled={assistBusy !== null}
-              className={`px-2 py-1 rounded text-xs font-medium transition-all
-                          ${assistBusy === id
-                            ? "bg-surface-hover text-foreground"
-                            : "text-foreground-secondary hover:text-foreground hover:bg-surface-hover"
-                          } disabled:opacity-60`}
+              className={`px-2 py-1 rounded text-xs font-medium transition-all disabled:opacity-60
+                          ${inputMode === "translate" ? "bg-surface-hover text-foreground" : "text-foreground-secondary hover:text-foreground hover:bg-surface-hover"}`}
             >
-              {assistBusy === id ? `${label}…` : label}
+              Translate
             </button>
-          ))}
+            <button
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => { setInputMode((m) => (m === "ask" ? null : "ask")); setAssistErr(null); }}
+              disabled={assistBusy !== null}
+              className={`px-2 py-1 rounded text-xs font-medium transition-all disabled:opacity-60
+                          ${inputMode === "ask" ? "bg-surface-hover text-foreground" : "text-foreground-secondary hover:text-foreground hover:bg-surface-hover"}`}
+            >
+              Ask AI
+            </button>
+            {notePdfDocId && (
+              <button
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={handleVerify}
+                disabled={assistBusy !== null}
+                title="Check this passage against the open PDF and correct/expand it"
+                className="px-2 py-1 rounded text-xs font-medium text-accent hover:bg-surface-hover transition-all disabled:opacity-60"
+              >
+                Check vs PDF
+              </button>
+            )}
+          </div>
+
+          {inputMode && (
+            <div className="flex items-center gap-1 px-0.5 pb-0.5">
+              <input
+                autoFocus
+                value={inputValue}
+                onChange={(e) => setInputValue(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") { e.preventDefault(); runInput(); }
+                  if (e.key === "Escape") { setInputMode(null); setInputValue(""); }
+                }}
+                placeholder={inputMode === "translate" ? "Language (e.g. German, Spanish, 日本語)…" : "Tell the AI what to do…"}
+                className="input-base flex-1 text-xs py-1 w-[260px]"
+              />
+              <button
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={runInput}
+                disabled={assistBusy !== null || !inputValue.trim()}
+                className="btn-primary text-xs px-2.5 py-1 flex-shrink-0 disabled:opacity-50"
+              >
+                {assistBusy ? "…" : inputMode === "translate" ? "Go" : "Apply"}
+              </button>
+            </div>
+          )}
+
           {assistErr && (
-            <span className="px-2 text-xs text-red-400 max-w-[240px] truncate" title={assistErr}>
+            <span className="px-1.5 pb-0.5 text-xs text-red-400 max-w-[320px] truncate" title={assistErr}>
               {assistErr}
             </span>
           )}

@@ -68,7 +68,7 @@ export default function LibraryPanel() {
       // Free the previously-open blob before replacing it.
       if (notePdfUrl) URL.revokeObjectURL(notePdfUrl);
       const url = await libraryDocBlobUrl(doc);
-      setNotePdf(url, doc.title);
+      setNotePdf(url, doc.title, doc.id);
       if (!showNotepadPdf) toggleNotepadPdf();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));

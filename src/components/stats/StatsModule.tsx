@@ -200,21 +200,26 @@ export default function StatsModule() {
           {/* 7-day chart */}
           <div className="surface p-6">
             <h2 className="text-sm font-semibold text-foreground mb-4">Last 7 Days</h2>
+            {/* Bars: each column is full-height so the bar's % resolves against
+                a fixed height (was collapsing to a uniform look before). */}
             <div className="flex items-end gap-2 h-32">
               {last7Days.map((day, i) => (
-                <div key={i} className="flex-1 flex flex-col items-center gap-1">
+                <div key={i} className="flex-1 h-full flex flex-col justify-end">
                   <motion.div
                     initial={{ height: 0 }}
-                    animate={{ height: `${(day.duration / maxDuration) * 100}%` }}
+                    animate={{ height: `${Math.round((day.duration / maxDuration) * 100)}%` }}
                     transition={{ duration: 0.5, delay: i * 0.05 }}
                     className={`w-full rounded-t-md min-h-[2px] ${
                       day.duration > 0 ? "bg-accent-gradient" : "bg-surface-hover"
                     }`}
-                    style={{ maxHeight: "100%" }}
                     title={formatDuration(day.duration)}
                   />
-                  <span className="text-xs text-muted">{day.label}</span>
                 </div>
+              ))}
+            </div>
+            <div className="flex gap-2 mt-1">
+              {last7Days.map((day, i) => (
+                <span key={i} className="flex-1 text-center text-xs text-muted">{day.label}</span>
               ))}
             </div>
           </div>

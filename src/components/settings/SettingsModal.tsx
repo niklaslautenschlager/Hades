@@ -53,6 +53,11 @@ export default function SettingsModal({ onClose }: Props) {
     setAutoSyncDeadlines,
     sessionReflectionEnabled,
     setSessionReflectionEnabled,
+    remindersEnabled,
+    setRemindersEnabled,
+    reminderLeadMinutes,
+    setReminderLeadMinutes,
+    setOnboardingSeen,
     showWeekNumbers,
     setShowWeekNumbers,
     weekStartsOn,
@@ -108,6 +113,11 @@ export default function SettingsModal({ onClose }: Props) {
       setAutoSyncDeadlines: s.setAutoSyncDeadlines,
       sessionReflectionEnabled: s.sessionReflectionEnabled,
       setSessionReflectionEnabled: s.setSessionReflectionEnabled,
+      remindersEnabled: s.remindersEnabled,
+      setRemindersEnabled: s.setRemindersEnabled,
+      reminderLeadMinutes: s.reminderLeadMinutes,
+      setReminderLeadMinutes: s.setReminderLeadMinutes,
+      setOnboardingSeen: s.setOnboardingSeen,
       showWeekNumbers: s.showWeekNumbers,
       setShowWeekNumbers: s.setShowWeekNumbers,
       weekStartsOn: s.weekStartsOn,
@@ -625,6 +635,27 @@ export default function SettingsModal({ onClose }: Props) {
                   value={sessionReflectionEnabled}
                   onChange={setSessionReflectionEnabled}
                 />
+                <Toggle
+                  label="Event reminders"
+                  description="A gentle in-app reminder shortly before a calendar event starts."
+                  value={remindersEnabled}
+                  onChange={setRemindersEnabled}
+                />
+                {remindersEnabled && (
+                  <div className="flex items-center justify-between pl-1">
+                    <span className="text-xs text-muted">Remind me this many minutes before</span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={120}
+                      value={reminderLeadMinutes}
+                      onChange={(e) =>
+                        setReminderLeadMinutes(Math.max(1, Math.min(120, parseInt(e.target.value) || 10)))
+                      }
+                      className="input-base w-16 text-center text-sm font-mono"
+                    />
+                  </div>
+                )}
               </div>
             </section>
 
@@ -822,6 +853,20 @@ export default function SettingsModal({ onClose }: Props) {
             {/* Advanced tab — Danger Zone (the Update banner above is also gated here) */}
             {tab === "advanced" && (
             <section>
+              {/* Replay onboarding */}
+              <div className="rounded-xl border border-border px-4 py-3 mb-5 flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-foreground">Replay the tutorial</p>
+                  <p className="text-xs text-muted mt-0.5">Show the first-launch walkthrough again.</p>
+                </div>
+                <button
+                  onClick={() => { setOnboardingSeen(false); onClose(); }}
+                  className="btn-ghost text-xs border border-border flex-shrink-0"
+                >
+                  Replay
+                </button>
+              </div>
+
               <div className="flex items-center gap-2 mb-3">
                 <AlertTriangle className="w-3.5 h-3.5 text-red-400" />
                 <span className="text-xs font-medium text-red-400 uppercase tracking-wider">

@@ -1,5 +1,7 @@
+import { getVersion } from "@tauri-apps/api/app";
 import { useStore, type Module, type NoteFile } from "../store/useStore";
 import { search } from "./ragIndex";
+import { WHATS_NEW } from "./changelog";
 
 // Vendor-agnostic agentic tools. The model requests actions by emitting fenced
 // ```tool blocks containing JSON; we parse, execute against the Zustand store,
@@ -394,6 +396,23 @@ export const AGENT_TOOLS: ToolDef[] = [
       if (!text) return { summary: "set_goal failed", observation: "Error: 'text' is required." };
       useStore.getState().setGoal(text);
       return { summary: `Goal set: "${text}"`, observation: `Session goal set to "${text}".` };
+    },
+  },
+  {
+    name: "whats_new",
+    description: "Get the app version and a summary of what's new / recent features in Hades. Use when the user asks 'what's new', 'what can you do', or about recent updates.",
+    args: `{}`,
+    run: async () => {
+      let version = "";
+      try { version = await getVersion(); } catch { /* not in Tauri */ }
+      const s = useStore.getState();
+      const updateLine = s.updateAvailable && s.updateVersion
+        ? `\n\nAn update to v${s.updateVersion} is available — the user can install it from Settings.`
+        : "";
+      return {
+        summary: "Read what's new",
+        observation: `${version ? `Current version: v${version}.\n\n` : ""}${WHATS_NEW}${updateLine}`,
+      };
     },
   },
   {

@@ -1,8 +1,8 @@
-import { marked } from "marked";
 import { save } from "@tauri-apps/plugin-dialog";
 import { writeTextFile, writeFile } from "@tauri-apps/plugin-fs";
 import { jsPDF } from "jspdf";
 import html2canvas from "html2canvas";
+import { renderNoteHtml } from "./markdownRender";
 
 /**
  * Export a note as a .md file using Tauri's save dialog.
@@ -32,15 +32,16 @@ export async function exportAsPdf(name: string, content: string): Promise<void> 
   });
   if (!filePath) return;
 
-  const html = marked.parse(content || "*Empty note*") as string;
+  const html = renderNoteHtml(content || "*Empty note*");
 
-  // Build a visible-but-off-canvas container (must be in layout for html2canvas)
+  // Build the container OFF-SCREEN at full opacity. html2canvas honors opacity,
+  // so an opacity:0 element rasterises to a blank (transparent → white) page —
+  // positioning it far off-screen keeps it rendered but out of view.
   const wrapper = document.createElement("div");
   wrapper.style.cssText = [
     "position:fixed",
-    "left:0",
+    "left:-10000px",
     "top:0",
-    "z-index:-1",
     "width:794px",          // ~A4 width @ 96dpi
     "padding:48px 56px",
     "box-sizing:border-box",
@@ -49,7 +50,6 @@ export async function exportAsPdf(name: string, content: string): Promise<void> 
     "font-family:Inter,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif",
     "font-size:14px",
     "line-height:1.7",
-    "opacity:0",
     "pointer-events:none",
   ].join(";");
 
@@ -74,6 +74,12 @@ export async function exportAsPdf(name: string, content: string): Promise<void> 
       .pdf-root th,.pdf-root td { padding:7px 11px; border:1px solid #e5e5e5; text-align:left; }
       .pdf-root th { font-weight:600; background:#fafaf9; }
       .pdf-root img { max-width:100%; }
+      .pdf-root sup.fn-ref { font-size:0.7em; line-height:0; }
+      .pdf-root sup.fn-ref a { color:#2563eb; text-decoration:none; }
+      .pdf-root hr.fn-sep { margin-top:2em; }
+      .pdf-root ol.footnotes { font-size:0.85em; color:#57534e; padding-left:1.4em; }
+      .pdf-root ol.footnotes li { margin:0.2em 0; }
+      .pdf-root .fn-back { text-decoration:none; color:#9ca3af; }
     </style>
     <div class="pdf-root"><h1>${escapeHtml(name)}</h1>${html}</div>
   `;
@@ -85,7 +91,16 @@ export async function exportAsPdf(name: string, content: string): Promise<void> 
       backgroundColor: "#ffffff",
       useCORS: true,
       logging: false,
+      width: wrapper.offsetWidth,
+      height: wrapper.scrollHeight,
+      windowWidth: wrapper.offsetWidth,
+      windowHeight: wrapper.scrollHeight,
+      scrollX: 0,
+      scrollY: 0,
     });
+    if (canvas.width === 0 || canvas.height === 0) {
+      throw new Error("Rendered an empty page — the note may have no printable content.");
+    }
 
     const pdf = new jsPDF({ unit: "pt", format: "a4", orientation: "portrait" });
     const pageW = pdf.internal.pageSize.getWidth();

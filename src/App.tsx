@@ -7,6 +7,8 @@ import PomodoroModule from "./components/pomodoro/PomodoroModule";
 import TasksModule from "./components/tasks/TasksModule";
 import SyncOverlay from "./components/SyncOverlay";
 import CommandPalette from "./components/CommandPalette";
+import ReminderHost from "./components/ReminderHost";
+import Onboarding from "./components/Onboarding";
 import { useSyncTimer } from "./hooks/useSyncTimer";
 import { useStartupSync } from "./hooks/useStartupSync";
 import { useQuitGuard } from "./hooks/useQuitGuard";
@@ -72,6 +74,8 @@ export default function App() {
       </AnimatePresence>
       <SyncOverlay />
       <CommandPalette />
+      <ReminderHost />
+      <Onboarding />
     </Shell>
   );
 }
