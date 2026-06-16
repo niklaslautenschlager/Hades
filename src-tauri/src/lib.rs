@@ -455,6 +455,70 @@ async fn embed_texts(base_url: String, model: String, texts: Vec<String>) -> Res
     Ok(out)
 }
 
+// ─── OCR (Tesseract) ────────────────────────────────────────────────────────
+// OCR is the fallback when a PDF has no usable text layer. We shell out to a
+// `tesseract` binary. Resolution order:
+//   1. A bundled sidecar next to the app executable (when shipped — see CI).
+//   2. `tesseract` on the system PATH.
+// If neither exists, ocr_available() returns false and the caller surfaces an
+// honest "could not verify / OCR unavailable" state rather than guessing.
+
+fn tesseract_path() -> Option<std::path::PathBuf> {
+    // 1. Bundled sidecar beside the current executable.
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            for name in ["tesseract", "tesseract.exe"] {
+                let p = dir.join(name);
+                if p.exists() {
+                    return Some(p);
+                }
+            }
+        }
+    }
+    // 2. System PATH — probe with a version call.
+    let probe = std::process::Command::new("tesseract").arg("--version").output();
+    if matches!(probe, Ok(o) if o.status.success() || !o.stdout.is_empty()) {
+        return Some(std::path::PathBuf::from("tesseract"));
+    }
+    None
+}
+
+#[tauri::command]
+fn ocr_available() -> bool {
+    tesseract_path().is_some()
+}
+
+#[tauri::command]
+async fn ocr_image(png: Vec<u8>, lang: Option<String>) -> Result<String, String> {
+    let bin = tesseract_path().ok_or_else(|| "Tesseract is not installed".to_string())?;
+    let lang = lang.unwrap_or_else(|| "eng".to_string());
+
+    // Write the PNG to a temp file, OCR it to stdout, then clean up.
+    let mut tmp = std::env::temp_dir();
+    tmp.push(format!("hades-ocr-{}.png", std::process::id().to_string() + &rand_suffix()));
+    std::fs::write(&tmp, &png).map_err(|e| format!("Cannot write temp image: {}", e))?;
+
+    let output = std::process::Command::new(&bin)
+        .arg(&tmp)
+        .arg("stdout")
+        .arg("-l")
+        .arg(&lang)
+        .output();
+    let _ = std::fs::remove_file(&tmp);
+
+    match output {
+        Ok(o) if o.status.success() => Ok(String::from_utf8_lossy(&o.stdout).to_string()),
+        Ok(o) => Err(format!("OCR failed: {}", String::from_utf8_lossy(&o.stderr))),
+        Err(e) => Err(format!("Could not run Tesseract: {}", e)),
+    }
+}
+
+fn rand_suffix() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let n = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
+    format!("-{}", n)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Force X11 backend before GTK initialises to avoid Wayland protocol errors
@@ -490,6 +554,8 @@ pub fn run() {
             app_data_read,
             app_data_remove,
             embed_texts,
+            ocr_available,
+            ocr_image,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

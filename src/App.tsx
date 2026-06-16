@@ -9,6 +9,8 @@ import SyncOverlay from "./components/SyncOverlay";
 import CommandPalette from "./components/CommandPalette";
 import ReminderHost from "./components/ReminderHost";
 import Onboarding from "./components/Onboarding";
+import ToastHost from "./components/ToastHost";
+import { usePomodoroNudge } from "./hooks/usePomodoroNudge";
 import { useSyncTimer } from "./hooks/useSyncTimer";
 import { useStartupSync } from "./hooks/useStartupSync";
 import { useQuitGuard } from "./hooks/useQuitGuard";
@@ -35,6 +37,7 @@ export default function App() {
   useQuitGuard();
   useUpdateCheck();
   useIcalSync();
+  usePomodoroNudge();
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
@@ -76,6 +79,7 @@ export default function App() {
       <CommandPalette />
       <ReminderHost />
       <Onboarding />
+      <ToastHost />
     </Shell>
   );
 }

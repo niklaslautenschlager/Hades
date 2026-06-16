@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from "react";
-import { Loader2 } from "lucide-react";
+import { Loader2, Plus, Minus } from "lucide-react";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 import { useStore } from "../../store/useStore";
@@ -21,10 +21,12 @@ export default function PdfCanvas({ url, storageKey }: Props) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [page, setPage] = useState(1);
+  const [zoom, setZoom] = useState(() => useStore.getState().pdfZoom[storageKey] ?? 1);
+  const zoomRef = useRef(zoom);
   const restoredRef = useRef(false);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Render one page into its placeholder canvas at the container's width.
+  // Render one page into its placeholder canvas at the container's width × zoom.
   const renderPage = useCallback(async (pageNum: number) => {
     const doc = docRef.current;
     const container = scrollRef.current;
@@ -35,7 +37,7 @@ export default function PdfCanvas({ url, storageKey }: Props) {
     try {
       const pdfPage = await doc.getPage(pageNum);
       const unscaled = pdfPage.getViewport({ scale: 1 });
-      const targetW = Math.max(200, container.clientWidth - 24);
+      const targetW = Math.max(200, (container.clientWidth - 24) * zoomRef.current);
       const scale = (targetW / unscaled.width) * (window.devicePixelRatio || 1);
       const viewport = pdfPage.getViewport({ scale });
       const canvas = document.createElement("canvas");
@@ -126,6 +128,39 @@ export default function PdfCanvas({ url, storageKey }: Props) {
     }, 400);
   }
 
+  // ── Zoom (§3.1) ────────────────────────────────────────────────────────────
+  // Re-render visible pages whenever the zoom factor changes, keeping the
+  // current page anchored, and persist the chosen zoom per document.
+  useEffect(() => {
+    zoomRef.current = zoom;
+    if (numPages === 0) return;
+    const container = scrollRef.current;
+    const anchor = page;
+    rendered.current = new Set(); // force re-render at the new scale
+    const top = container?.scrollTop ?? 0;
+    void Promise.resolve().then(async () => {
+      for (let p = Math.max(1, anchor - 1); p <= Math.min(numPages, anchor + 2); p++) {
+        await renderPage(p);
+      }
+      // Keep the page the user was on roughly in view after re-layout.
+      const holder = container?.querySelector<HTMLElement>(`[data-page="${anchor}"]`);
+      if (holder && top > 0) holder.scrollIntoView({ block: "start" });
+    });
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => useStore.getState().setPdfZoom(storageKey, zoom), 400);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [zoom, numPages]);
+
+  function adjustZoom(delta: number) {
+    setZoom((z) => Math.max(0.5, Math.min(3, Math.round((z + delta) * 100) / 100)));
+  }
+
+  function onWheel(e: React.WheelEvent) {
+    if (!(e.ctrlKey || e.metaKey)) return;
+    e.preventDefault();
+    adjustZoom(e.deltaY < 0 ? 0.1 : -0.1);
+  }
+
   if (error) {
     return (
       <div className="flex-1 flex items-center justify-center p-6 text-center">
@@ -142,16 +177,47 @@ export default function PdfCanvas({ url, storageKey }: Props) {
         </div>
       )}
       {numPages > 0 && (
-        <div className="absolute top-2 right-3 z-10 px-2 py-0.5 rounded-md bg-surface-elevated/90 border border-border text-[11px] text-foreground-secondary pointer-events-none">
-          {page} / {numPages}
+        <div className="absolute top-2 right-3 z-10 flex items-center gap-1">
+          <div className="flex items-center rounded-md bg-surface-elevated/95 border border-border overflow-hidden">
+            <button
+              onClick={() => adjustZoom(-0.1)}
+              title="Zoom out"
+              className="px-1.5 py-0.5 text-foreground-secondary hover:bg-surface-hover transition-colors"
+            >
+              <Minus className="w-3 h-3" />
+            </button>
+            <button
+              onClick={() => setZoom(1)}
+              title="Reset zoom"
+              className="px-1.5 py-0.5 text-[11px] text-foreground-secondary hover:bg-surface-hover transition-colors tabular-nums min-w-[34px]"
+            >
+              {Math.round(zoom * 100)}%
+            </button>
+            <button
+              onClick={() => adjustZoom(0.1)}
+              title="Zoom in"
+              className="px-1.5 py-0.5 text-foreground-secondary hover:bg-surface-hover transition-colors"
+            >
+              <Plus className="w-3 h-3" />
+            </button>
+          </div>
+          <div className="px-2 py-0.5 rounded-md bg-surface-elevated/95 border border-border text-[11px] text-foreground-secondary tabular-nums">
+            {page} / {numPages}
+          </div>
         </div>
       )}
-      <div ref={scrollRef} onScroll={onScroll} className="h-full overflow-y-auto px-3 py-3 bg-surface-elevated">
+      <div
+        ref={scrollRef}
+        onScroll={onScroll}
+        onWheel={onWheel}
+        className="h-full overflow-auto px-3 py-3 bg-surface-elevated"
+      >
         {Array.from({ length: numPages }, (_, i) => (
           <div
             key={i}
             data-page={i + 1}
-            className="mx-auto mb-3 bg-white rounded shadow-sm min-h-[200px] w-full max-w-[900px]"
+            className="mx-auto mb-3 bg-white rounded shadow-sm min-h-[200px]"
+            style={{ width: `${100 * zoom}%`, maxWidth: `${900 * zoom}px` }}
           />
         ))}
       </div>

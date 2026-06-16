@@ -177,12 +177,7 @@ export default function NotepadModule() {
 
   // ── AI actions (F1 generate flashcards, F5 tidy note) ─────────────────────
   const [aiBusy, setAiBusy] = useState<null | "cards" | "tidy">(null);
-  const [aiMsg, setAiMsg] = useState<string | null>(null);
-
-  function flashMsg(msg: string) {
-    setAiMsg(msg);
-    setTimeout(() => setAiMsg(null), 6000);
-  }
+  const pushToast = useStore((s) => s.pushToast);
 
   async function handleGenerateFlashcards() {
     if (!activeNote || aiBusy) return;
@@ -190,9 +185,9 @@ export default function NotepadModule() {
     setAiBusy("cards");
     try {
       const { deckName, added } = await generateFlashcardsFromText(activeNote.name, activeNote.content);
-      flashMsg(`Added ${added} card${added === 1 ? "" : "s"} to "${deckName}". Review them in Flashcards.`);
+      pushToast({ message: `Added ${added} card${added === 1 ? "" : "s"} to "${deckName}". Review them in Flashcards.`, icon: "check", tone: "success" });
     } catch (e) {
-      flashMsg(e instanceof Error ? e.message : String(e));
+      pushToast({ message: e instanceof Error ? e.message : String(e), tone: "error", icon: "info" });
     } finally {
       setAiBusy(null);
     }
@@ -208,9 +203,9 @@ export default function NotepadModule() {
       if (!hasActiveEditor() || !replaceAll(cleaned)) {
         updateNote(activeNote.id, { content: cleaned });
       }
-      flashMsg("Note tidied — press Cmd/Ctrl-Z to undo.");
+      pushToast({ message: "Note tidied — press Cmd/Ctrl-Z to undo.", icon: "sparkles" });
     } catch (e) {
-      flashMsg(e instanceof Error ? e.message : String(e));
+      pushToast({ message: e instanceof Error ? e.message : String(e), tone: "error", icon: "info" });
     } finally {
       setAiBusy(null);
     }
@@ -551,13 +546,13 @@ export default function NotepadModule() {
       {/* Undo toast for tree deletions */}
       <DeletionUndoToast />
 
-      {/* ── AI action toast ─────────────────────────────────────────────────── */}
-      {(aiMsg || aiBusy) && (
+      {/* In-progress indicator for long AI actions (results go to the shared toast) */}
+      {aiBusy && (
         <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 px-4 py-2 surface shadow-xl
                         flex items-center gap-2 max-w-md">
-          {aiBusy && <Loader2 className="w-3.5 h-3.5 animate-spin text-muted flex-shrink-0" />}
+          <Loader2 className="w-3.5 h-3.5 animate-spin text-muted flex-shrink-0" />
           <span className="text-xs text-foreground-secondary">
-            {aiBusy === "cards" ? "Generating flashcards…" : aiBusy === "tidy" ? "Tidying note…" : aiMsg}
+            {aiBusy === "cards" ? "Generating flashcards…" : "Tidying note…"}
           </span>
         </div>
       )}

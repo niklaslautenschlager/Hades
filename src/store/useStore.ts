@@ -45,6 +45,17 @@ export type Theme =
 
 export type SoundType = "bell" | "chime" | "gong" | "digital" | "none";
 
+// Shared transient notification (§6.1). Ephemeral — never persisted.
+export interface Toast {
+  id: string;
+  message: string;
+  tone?: "default" | "success" | "error";
+  icon?: "bell" | "info" | "check" | "sparkles" | "timer";
+  actionLabel?: string;
+  onAction?: () => void;
+  durationMs?: number; // default 10000; 0 disables auto-dismiss
+}
+
 export interface ChatMessage {
   role: "user" | "assistant";
   content: string;
@@ -204,6 +215,16 @@ interface AppState {
   assistantSeed: { text: string; n: number } | null;
   seedAssistant: (text: string) => void;
 
+  // ── Transient notifications (§6.1) — shared, ephemeral ──────────────────────
+  toasts: Toast[];
+  pushToast: (t: Omit<Toast, "id">) => string;
+  dismissToast: (id: string) => void;
+
+  // ── OCR diagnostics (§2.1) — escalation count + recent reasons ──────────────
+  ocrEscalations: number;
+  ocrLog: string[];
+  recordOcrEscalation: (reason: string) => void;
+
   setActiveModule: (m: Module) => void;
   setApiKey: (key: string) => void;
   setGroqModel: (model: GroqModelId) => void;
@@ -310,6 +331,10 @@ interface AppState {
   // Remembered page per PDF (keyed by doc id or filename) so it restores on return.
   pdfPages: Record<string, number>;
   setPdfPage: (key: string, page: number) => void;
+  pdfZoom: Record<string, number>;       // remembered zoom factor per PDF
+  setPdfZoom: (key: string, zoom: number) => void;
+  noteZoom: Record<string, number>;      // remembered font size per note id
+  setNoteZoom: (id: string, size: number) => void;
 
   addNote: (parentId?: string | null) => string;
   addFolder: (parentId?: string | null) => void;
@@ -462,6 +487,22 @@ export const useStore = create<AppState>()(
       assistantSeed: null,
       seedAssistant: (text) =>
         set((s) => ({ assistantSeed: { text, n: (s.assistantSeed?.n ?? 0) + 1 }, activeModule: "pomodoro" })),
+
+      toasts: [],
+      pushToast: (t) => {
+        const id = uid();
+        set((s) => ({ toasts: [...s.toasts, { ...t, id }] }));
+        return id;
+      },
+      dismissToast: (id) => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),
+
+      ocrEscalations: 0,
+      ocrLog: [],
+      recordOcrEscalation: (reason) =>
+        set((s) => ({
+          ocrEscalations: s.ocrEscalations + 1,
+          ocrLog: [`${new Date().toLocaleString()} — ${reason}`, ...s.ocrLog].slice(0, 50),
+        })),
 
       setActiveModule: (activeModule) => set({ activeModule }),
       setApiKey: (apiKey) =>
@@ -841,6 +882,12 @@ export const useStore = create<AppState>()(
       pdfPages: {},
       setPdfPage: (key, page) =>
         set((s) => (s.pdfPages[key] === page ? {} : { pdfPages: { ...s.pdfPages, [key]: page } })),
+      pdfZoom: {},
+      setPdfZoom: (key, zoom) =>
+        set((s) => (s.pdfZoom[key] === zoom ? {} : { pdfZoom: { ...s.pdfZoom, [key]: zoom } })),
+      noteZoom: {},
+      setNoteZoom: (id, size) =>
+        set((s) => (s.noteZoom[id] === size ? {} : { noteZoom: { ...s.noteZoom, [id]: size } })),
 
       notes: [
         {
@@ -1400,7 +1447,7 @@ export const useStore = create<AppState>()(
     }),
     {
       name: "hades-store",
-      version: 10,
+      version: 12,
       migrate: (persisted: any, version) => {
         if (!persisted) return persisted;
         if (version < 2) {
@@ -1491,6 +1538,14 @@ export const useStore = create<AppState>()(
           // Existing users have already learned the app — don't show onboarding.
           if (!("onboardingSeen" in persisted)) persisted.onboardingSeen = true;
         }
+        if (version < 11) {
+          if (!persisted.pdfZoom || typeof persisted.pdfZoom !== "object") persisted.pdfZoom = {};
+          if (!persisted.noteZoom || typeof persisted.noteZoom !== "object") persisted.noteZoom = {};
+        }
+        if (version < 12) {
+          if (typeof persisted.ocrEscalations !== "number") persisted.ocrEscalations = 0;
+          if (!Array.isArray(persisted.ocrLog)) persisted.ocrLog = [];
+        }
         return persisted;
       },
       partialize: (s) => ({
@@ -1501,6 +1556,7 @@ export const useStore = create<AppState>()(
         taskFinishPrompt: null,
         assistantSeed: null,
         lastDeletedNotes: null,
+        toasts: [],
         isChatLoading: false,
         notePdfUrl: null,
         notePdfFileName: "",

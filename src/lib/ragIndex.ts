@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useStore, type NoteFile, type LibraryDoc } from "../store/useStore";
-import { libraryDocBytes, extractPdfText } from "./pdfLibrary";
+import { libraryDocText } from "./pdfLibrary";
 
 // On-device semantic index over the user's notes + PDF library. Embeddings are
 // produced locally by Ollama (privacy-first); vectors live in a JSON file under
@@ -140,8 +140,8 @@ async function chunksForNote(note: NoteFile): Promise<RagChunk[]> {
 async function chunksForDoc(doc: LibraryDoc): Promise<RagChunk[]> {
   let text = "";
   try {
-    const bytes = await libraryDocBytes(doc);
-    text = await extractPdfText(bytes);
+    // Routes through the extraction cascade (text layer → OCR) + hidden cache.
+    text = await libraryDocText(doc);
   } catch {
     text = "";
   }

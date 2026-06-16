@@ -175,6 +175,8 @@ export default function SettingsModal({ onClose }: Props) {
   const [ragStale, setRagStale] = useState(0);
   const [ragBusy, setRagBusy] = useState(false);
   const [ragMsg, setRagMsg] = useState<string | null>(null);
+  const ocrEscalations = useStore((s) => s.ocrEscalations);
+  const ocrLog = useStore((s) => s.ocrLog);
 
   useEffect(() => {
     if (tab !== "ai") return;
@@ -581,6 +583,11 @@ export default function SettingsModal({ onClose }: Props) {
                     Embeds locally via Ollama (<code className="font-mono">{EMBED_MODEL}</code>). Notes re-index automatically as you edit.
                   </p>
                   {ragMsg && <p className="text-[11px] text-foreground-secondary mt-1">{ragMsg}</p>}
+                  {ocrEscalations > 0 && (
+                    <p className="text-[11px] text-muted mt-1" title={ocrLog.slice(0, 8).join("\n")}>
+                      OCR fallbacks used: {ocrEscalations}. A high count means many PDFs lack a text layer.
+                    </p>
+                  )}
                 </div>
 
                 {/* Agent mode */}

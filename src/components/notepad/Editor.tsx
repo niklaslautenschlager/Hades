@@ -104,7 +104,12 @@ export default function Editor({ noteId, content, onChange }: Props) {
   const fontSizeCompartment = useRef(new Compartment());
   const onChangeRef = useRef(onChange);
   const [initError, setInitError] = useState<string | null>(null);
-  const [fontSize, setFontSize] = useState(15);
+  // §4.2 — note zoom (font size) is remembered per note.
+  const [fontSize, setFontSize] = useState(() => useStore.getState().noteZoom[noteId] ?? 15);
+  // Persist zoom for this note whenever it changes.
+  useEffect(() => { useStore.getState().setNoteZoom(noteId, fontSize); }, [noteId, fontSize]);
+  // Restore the saved zoom when switching to a different note.
+  useEffect(() => { setFontSize(useStore.getState().noteZoom[noteId] ?? 15); }, [noteId]);
 
   // ── Inline writing assist (F7) ─────────────────────────────────────────────
   const [assist, setAssist] = useState<{ from: number; to: number; x: number; y: number } | null>(null);
@@ -113,6 +118,11 @@ export default function Editor({ noteId, content, onChange }: Props) {
   // Secondary input row for "Translate" / "Ask AI".
   const [inputMode, setInputMode] = useState<null | "translate" | "ask">(null);
   const [inputValue, setInputValue] = useState("");
+  // Ephemeral verify-against-PDF result (§2.2/§2.3) — never auto-written.
+  const [verify, setVerify] = useState<
+    | { kind: "accurate" | "cannot" | "changed"; proposed?: string; from: number; to: number }
+    | null
+  >(null);
   const assistTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const assistBusyRef = useRef(false);
   const aiEnabledRef = useRef(aiEnabled);
@@ -165,27 +175,29 @@ export default function Editor({ noteId, content, onChange }: Props) {
     }
   }
 
-  // Check the selection against the open PDF: correct/expand it, or leave it.
+  // Check the selection against the open PDF. §2.2/§2.3: produce an explicit
+  // state and NEVER write into the note automatically — corrections are proposed
+  // ephemerally and only applied on an explicit Accept.
   async function handleVerify() {
     const view = viewRef.current;
     if (!view || !assist || assistBusy) return;
     setAssistBusy("expand"); // reuse busy flag for the spinner
     setAssistErr(null);
+    setVerify(null);
     assistBusyRef.current = true;
     try {
       const text = view.state.sliceDoc(assist.from, assist.to);
       const src = await getOpenPdfText();
       if (!src.trim()) {
-        setAssistErr("That PDF has no extractable text.");
+        // Distinct "could not verify" — must not read as "accurate".
+        setVerify({ kind: "cannot", from: assist.from, to: assist.to });
         return;
       }
       const { ok, text: result } = await verifyAgainstSource(text, src);
       if (!ok && result.trim() && result.trim() !== text.trim()) {
-        view.dispatch({ changes: { from: assist.from, to: assist.to, insert: result }, scrollIntoView: true });
-        setAssist(null);
+        setVerify({ kind: "changed", proposed: result, from: assist.from, to: assist.to });
       } else {
-        setAssistErr("Looks accurate — no changes.");
-        setTimeout(() => setAssistErr(null), 2500);
+        setVerify({ kind: "accurate", from: assist.from, to: assist.to });
       }
     } catch (e) {
       setAssistErr(e instanceof Error ? e.message : String(e));
@@ -193,6 +205,14 @@ export default function Editor({ noteId, content, onChange }: Props) {
       setAssistBusy(null);
       assistBusyRef.current = false;
     }
+  }
+
+  function acceptVerify() {
+    const view = viewRef.current;
+    if (!view || !verify || verify.kind !== "changed" || !verify.proposed) return;
+    view.dispatch({ changes: { from: verify.from, to: verify.to, insert: verify.proposed }, scrollIntoView: true });
+    setVerify(null);
+    setAssist(null);
   }
 
   // Run a Translate / Ask-AI request from the secondary input row.
@@ -221,8 +241,8 @@ export default function Editor({ noteId, content, onChange }: Props) {
     }
   }
 
-  // Reset the input row whenever the popover target changes/closes.
-  useEffect(() => { if (!assist) { setInputMode(null); setInputValue(""); } }, [assist]);
+  // Reset the input row + verify panel whenever the popover target changes/closes.
+  useEffect(() => { if (!assist) { setInputMode(null); setInputValue(""); setVerify(null); } }, [assist]);
 
   useEffect(() => { onChangeRef.current = onChange; }, [onChange]);
 
@@ -526,6 +546,35 @@ export default function Editor({ noteId, content, onChange }: Props) {
               >
                 {assistBusy ? "…" : inputMode === "translate" ? "Go" : "Apply"}
               </button>
+            </div>
+          )}
+
+          {/* Verify-vs-PDF result (ephemeral; never written without Accept) */}
+          {verify?.kind === "accurate" && (
+            <div className="px-2 py-1 text-xs text-green-500 flex items-center gap-1.5">
+              ✓ Verified against the PDF — looks accurate.
+            </div>
+          )}
+          {verify?.kind === "cannot" && (
+            <div className="px-2 py-1 text-xs text-amber-500 flex items-center gap-1.5">
+              ⚠ Couldn't verify — no readable text in this PDF.
+            </div>
+          )}
+          {verify?.kind === "changed" && (
+            <div className="px-1.5 pb-1 w-[320px]">
+              <p className="text-[11px] text-muted mb-1">Suggested correction (not applied yet):</p>
+              <div className="max-h-32 overflow-y-auto rounded-md border border-border bg-surface-elevated px-2 py-1.5 text-xs text-foreground whitespace-pre-wrap">
+                {verify.proposed}
+              </div>
+              <div className="flex gap-1.5 mt-1.5">
+                <button onClick={acceptVerify} className="btn-primary text-xs px-2.5 py-1">Accept</button>
+                <button
+                  onClick={() => setVerify(null)}
+                  className="btn-ghost text-xs px-2.5 py-1 border border-border"
+                >
+                  Dismiss
+                </button>
+              </div>
             </div>
           )}
 
