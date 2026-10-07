@@ -2,7 +2,7 @@
 
 **Hades is a distraction-free desktop productivity suite for students and knowledge workers.** It bundles a focus timer, an AI study assistant, a Markdown note editor, a calendar, a task list, spaced-repetition flashcards, and focus statistics into one app — so you stop juggling a dozen browser tabs.
 
-Hades runs on **macOS, Linux, and Windows**, and stores everything **locally on your machine**. There is no Hades account and no Hades server.
+Hades runs on **macOS, Linux, and Windows**, and stores everything **locally on your machine**. There is no Hades account or Hades-hosted backend.
 
 ---
 
@@ -51,3 +51,7 @@ Hades is a free, non-commercial passion project under active development. **Bugs
 - **Found a bug or something out of date?** Open an issue on the [GitHub issue tracker](https://github.com/niklaslautenschlager/Hades/issues). Documentation lives in the same repo as the code — corrections are welcome as pull requests.
 - **Stuck on setup?** Check **[Troubleshooting](troubleshooting.md)** first; it covers the most common platform-specific problems.
 - **Want the developer-facing overview?** See the project [README](../README.md).
+
+## MCP integration
+
+See [MCP Server setup](../mcp/README.md) to connect an MCP client to Hades' Markdown notes in its configured cloud-sync folder.
