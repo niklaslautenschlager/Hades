@@ -1,6 +1,6 @@
 import * as tauriFs from "@tauri-apps/plugin-fs";
 import { save } from "@tauri-apps/plugin-dialog";
-import { useStore, type NoteFile, type SyncSnapshot } from "../store/useStore";
+import { useStore, type NoteFile, type SyncSnapshot, type SyncCommitResult } from "../store/useStore";
 import {
   EPOCH_ISO,
   VALID_ID,
@@ -799,7 +799,13 @@ async function execute(root: string, fs: FsAdapter, isCurrent: () => boolean): P
       await applyRemote(fs, root, remote, plan, deviceId, isCurrent);
       if (!isCurrent()) return { ...outcome, ok: false, kind: "error", message: "Sync was abandoned after a timeout." };
 
-      const res = useStore.getState().commitSyncResult(snapshot, plan);
+      committing = true;
+      let res: SyncCommitResult;
+      try {
+        res = useStore.getState().commitSyncResult(snapshot, plan);
+      } finally {
+        committing = false;
+      }
       outcome.pushed += plan.remoteWrites.length;
       outcome.pulled += plan.localUpserts.length;
       outcome.conflicts += plan.conflicts.length;
@@ -814,6 +820,11 @@ async function execute(root: string, fs: FsAdapter, isCurrent: () => boolean): P
 
 let inflight: Promise<SyncOutcome> | null = null;
 let currentRun = 0;
+// True while the engine itself writes notes, so that change isn't mistaken for a user edit.
+let committing = false;
+let lastEditWarningAt = -Infinity;
+export const EDIT_DURING_SYNC_NOTICE = "Syncing now — your edit is saved on this device and will sync on the next run.";
+const EDIT_WARNING_EVERY_MS = 5 * 60_000;
 
 export function isSyncRunning(): boolean {
   return inflight !== null;
@@ -847,6 +858,13 @@ export function syncNow(opts: SyncOptions = {}): Promise<SyncOutcome> {
     ...(opts.trigger === "manual" ? { syncFailures: 0 } : {}),
   });
 
+  // Edits made mid-run are deferred to the next run (commitSyncResult skips them); say so, rarely.
+  const unwatch = useStore.subscribe((s, prev) => {
+    if (committing || s.notes === prev.notes || Date.now() - lastEditWarningAt < EDIT_WARNING_EVERY_MS) return;
+    lastEditWarningAt = Date.now();
+    s.pushToast({ message: EDIT_DURING_SYNC_NOTICE, icon: "info", durationMs: 4000 });
+  });
+
   const run = (async () => {
     let timer: ReturnType<typeof setTimeout> | undefined;
     const timeout = new Promise<SyncOutcome>((resolve) => {
@@ -867,6 +885,7 @@ export function syncNow(opts: SyncOptions = {}): Promise<SyncOutcome> {
   })();
 
   const tracked = run.finally(() => {
+    unwatch();
     if (inflight === tracked) inflight = null;
   });
   inflight = tracked;
