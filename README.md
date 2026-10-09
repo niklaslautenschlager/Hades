@@ -1,8 +1,8 @@
-# Hades `v0.8.0`
+# Hades `v0.8.1`
 
 > **Early software.** Bugs and missing features are expected. Use at your own risk and back up any important data.
 >
-> 🆕 **New in 0.8.0:** a PDF **extraction cascade with OCR fallback** (Tesseract) so the AI can read scanned/slide PDFs, an honest **verify-against-PDF** (accurate / suggested-correction-with-accept / couldn't-verify — never auto-written), **PDF zoom** + page memory, per-note zoom, **translate / ask-AI** on a selection, a shared notification system + a gentle **Pomodoro nudge**. Past notes live in **[docs/updates/](docs/updates/)**.
+> 🆕 **New in 0.8.1:** four new light themes (22 in total), a Pomodoro cycle that restarts every day, a study-focused AI across every provider that indexes your notes, PDFs, events and tasks without needing Ollama, a **Cloud Sync (Beta)** rebuilt around conflict copies instead of overwrites, flashcards that never disappear after a review, and an opt-in **MCP bridge** for your schedule, open notes and stats. Past notes live in **[docs/updates/](docs/updates/)**.
 
 A focused, distraction-free desktop productivity suite built for students and knowledge workers. Hades combines a Pomodoro timer with an AI study assistant, a markdown note editor, calendar, task manager, flashcards with spaced repetition, and detailed focus statistics — all in one unified interface.
 
