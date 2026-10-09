@@ -10,7 +10,8 @@
     "tauri": "tauri",
     "dev:app": "GDK_BACKEND=x11 WEBKIT_DISABLE_COMPOSITING_MODE=1 WEBKIT_DISABLE_DMABUF_RENDERER=1 tauri dev",
     "build:install": "tauri build --no-bundle && cp src-tauri/target/release/hades ~/.local/bin/hades",
-    "build:appimage": "tauri build --no-bundle && node scripts/build-appimage.mjs"
+    "build:appimage": "tauri build --no-bundle && node scripts/build-appimage.mjs",
+    "test": "vitest run"
   },
   "dependencies": {
     "@codemirror/commands": "^6.10.3",
@@ -49,6 +50,7 @@
     "postcss": "^8.5.5",
     "tailwindcss": "^3.4.17",
     "typescript": "^5.8.3",
-    "vite": "^6.3.5"
+    "vite": "^6.3.5",
+    "vitest": "^3.2.7"
   }
 }

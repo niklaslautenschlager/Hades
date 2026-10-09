@@ -98,7 +98,7 @@ When Hades opens, you'll see a **narrow sidebar on the left** and the active mod
 
 **Bottom of the sidebar:**
 
-- **Palette icon** — quick theme switcher (18 themes).
+- **Palette icon** — quick theme switcher (22 themes).
 - **Gear icon** — Settings. A small colored dot appears here when an app update is available.
 
 > **Tip:** While the Focus timer is running and you've navigated to another module, a small **time pill** appears in the sidebar. Click it to jump straight back to the timer.

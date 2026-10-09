@@ -1,20 +1,12 @@
 import { useEffect } from "react";
 import { useStore } from "../store/useStore";
-import { fullSync } from "../lib/noteSync";
-import type { NoteFile } from "../store/useStore";
+import { isSyncRunning, syncNow } from "../lib/noteSync";
 
-// Reconcile with the sync folder on this cadence. fullSync is a complete
-// pull + push + prune and is idempotent, so running it with no changes is a
-// no-op apart from reading the folder.
-const SYNC_INTERVAL_MS = 30 * 1000;
-
-// Cheap signature so we only re-render the tree when something actually changed.
-function signature(notes: NoteFile[]): string {
-  return notes
-    .map((n) => `${n.id}:${n.updatedAt}:${n.parentId ?? ""}:${n.name}`)
-    .sort()
-    .join("|");
-}
+// Wake-up granularity only. When a sync actually runs is decided by
+// `nextSyncAt`, which the engine sets to 30 s after a success and to the
+// exponential backoff delay after a failure, and which "Retry now" resets.
+const TICK_MS = 5_000;
+const PENDING_DEBOUNCE_MS = 400;
 
 export function useSyncTimer() {
   const syncEnabled = useStore((s) => s.syncEnabled);
@@ -22,29 +14,26 @@ export function useSyncTimer() {
 
   useEffect(() => {
     if (!syncEnabled || !syncFolder) return;
-    const folder = syncFolder; // capture for closure
-
-    const run = async () => {
-      const st = useStore.getState();
-      if (st.isSyncing) return;
-
-      st.setIsSyncing(true);
-      st.setSyncError(null);
-      try {
-        const { mergedNotes } = await fullSync(folder, st.notes);
-        if (signature(mergedNotes) !== signature(useStore.getState().notes)) {
-          useStore.getState().applyMergedNotes(mergedNotes);
-        }
-        useStore.getState().setHasPendingChanges(false);
-        useStore.getState().setLastSyncAt(new Date().toISOString());
-      } catch (e) {
-        useStore.getState().setSyncError(e instanceof Error ? e.message : String(e));
-      } finally {
-        useStore.getState().setIsSyncing(false);
-      }
-    };
-
-    const id = setInterval(run, SYNC_INTERVAL_MS);
+    const id = setInterval(() => {
+      const s = useStore.getState();
+      if (isSyncRunning() || s.quitPending || Date.now() < s.nextSyncAt) return;
+      void syncNow({ trigger: "timer" });
+    }, TICK_MS);
     return () => clearInterval(id);
   }, [syncEnabled, syncFolder]);
+
+  useEffect(() => {
+    if (!syncEnabled) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    useStore.getState().refreshPendingCount();
+    const unsubscribe = useStore.subscribe((s, prev) => {
+      if (s.notes === prev.notes && s.syncBase === prev.syncBase) return;
+      clearTimeout(timer);
+      timer = setTimeout(() => useStore.getState().refreshPendingCount(), PENDING_DEBOUNCE_MS);
+    });
+    return () => {
+      unsubscribe();
+      clearTimeout(timer);
+    };
+  }, [syncEnabled]);
 }

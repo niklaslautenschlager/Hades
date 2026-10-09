@@ -22,7 +22,7 @@ Hades runs on **macOS, Linux, and Windows**, and stores everything **locally on 
 | **[Tasks](tasks.md)** | Adding and editing tasks, completion, deadlines from the calendar, timer linking |
 | **[Flashcards](flashcards.md)** | Decks, spaced repetition, reviewing cards, keyboard shortcuts |
 | **[Statistics](statistics.md)** | Focus-time tracking, weekly goal, streaks, charts |
-| **[Settings & Themes](settings-and-themes.md)** | Every setting explained, the 18 themes, and how updates work |
+| **[Settings & Themes](settings-and-themes.md)** | Every setting explained, the 22 themes, and how updates work |
 | **[Cloud Sync Setup](cloud-sync.md)** | Sync your notes across devices via Dropbox, iCloud, Google Drive, Syncthing, and more |
 | **[Troubleshooting](troubleshooting.md)** | Fixes for common problems on every platform |
 
@@ -55,3 +55,5 @@ Hades is a free, non-commercial passion project under active development. **Bugs
 ## MCP integration
 
 See [MCP Server setup](../mcp/README.md) to connect an MCP client to Hades' Markdown notes in its configured cloud-sync folder.
+
+The same server can also read your schedule, the notes open in the editor, the PDF open in the Notes pane and your study stats, and can log focus time. This is **off by default**: turn on **Settings → Advanced → Share live workspace with MCP server** (it needs a sync folder, and writes a snapshot into a hidden `.hades-bridge` folder inside it, which your cloud provider may upload). See the MCP README for the tools and the privacy details.

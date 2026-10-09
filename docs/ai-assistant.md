@@ -15,6 +15,7 @@ Hades doesn't ship with its own AI. You connect it to a provider ("vendor") of y
 | **Groq** (recommended) | Free tier | [console.groq.com/keys](https://console.groq.com/keys) |
 | **OpenAI** | Paid | [platform.openai.com/api-keys](https://platform.openai.com/api-keys) |
 | **Anthropic** | Paid | [console.anthropic.com/settings/keys](https://console.anthropic.com/settings/keys) |
+| **DeepSeek** | Paid (low cost) | [platform.deepseek.com/api_keys](https://platform.deepseek.com/api_keys) |
 | **Ollama** (local) | Free, runs on your machine | No key — see [Ollama](#using-ollama-fully-local-no-key) |
 
 > **Recommended starting point:** **Groq** has a free tier and is fast. Create an account, generate a key, and paste it into Hades.
@@ -25,7 +26,7 @@ Hades doesn't ship with its own AI. You connect it to a provider ("vendor") of y
 
 1. Open **Settings** (gear icon, bottom-left).
 2. Find the **AI Vendor** section.
-3. Click the vendor you want (**Groq**, **OpenAI**, **Anthropic**, or **Ollama**).
+3. Click the vendor you want (**Groq**, **OpenAI**, **Anthropic**, **DeepSeek**, or **Ollama**).
 4. Paste your **API key** into the key field. (Use the eye icon to reveal what you typed; the **"get a key →"** link opens the provider's key page.)
 5. Pick a **model** from the list.
 6. Click **Save**.
@@ -111,14 +112,70 @@ AI:   • Key takeaway 1  • Key takeaway 2  • Action items...
 
 ## Study mode vs. unrestricted mode
 
-By default the assistant **stays focused on learning and productivity**. Ask it something off-topic and it'll politely redirect you.
+By default the assistant **stays focused on learning and productivity** — and this works the same with every vendor (Groq, OpenAI, Anthropic, DeepSeek, Ollama) and in every mode: normal chat, [agent mode](#agent-mode-let-socrates-act-on-the-app), and `/research`.
+
+How it behaves:
+
+- **On-topic requests** (any academic subject, study techniques, productivity and planning, research and academic writing, programming you're learning, career skills, using Hades itself) are answered normally.
+- **Plausibly academic questions** that are a bit ambiguous are still answered — it won't refuse on a technicality.
+- **Clear tangents** (entertainment chit-chat, gossip, unrelated coding-for-hire, and the like) are not answered. Instead of a bare refusal, Socrates steers you back with something concrete to do. If **Use my notes as context** is on (Settings → AI), those suggestions name what you're actually working on: the note or PDF you have open, your next due task, your upcoming events. With it off, you get generic study suggestions, and no titles leave your machine.
+
+Under the hood the rule is stated at the start and again at the end of the instructions sent to the model, and a short reminder is attached to your latest message in the request. That reminder is never saved in the conversation and never shown in the chat. Background features that run their own prompt (flashcard generation, tidy note, translate, weekly review) are not chat and are not affected.
 
 If you want it to answer anything:
 
-- `/I-want-to-waste-my-time` — turn **off** the topic restriction (unrestricted mode).
+- `/I-want-to-waste-my-time` — turn **off** the topic restriction (unrestricted mode). The focus rule and the reminder are both removed.
 - `/back-to-studying` — turn the restriction back **on**.
 
 > Mode is per-conversation. `/clear` and restarting begin fresh.
+
+---
+
+## Your notes, PDFs, calendar and tasks as context
+
+Turn on **Use my notes as context** in **Settings → AI** and Socrates can draw on your own material. Everything it receives is labelled, and it cites what it used as `[Note: …]`, `[PDF: …]`, `[Event: …]` or `[Task: …]`.
+
+Each message can include:
+
+1. **What's open right now.** The note in your active tab (title and text, up to about 6,000 characters) and the PDF open in the Notes PDF pane: its title, the page you're on, the text of that page and its neighbours, then as much of the rest as fits in about 6,000 characters (flagged as truncated when cut). This is how "summarise this note" or "what does this page mean?" works without you pasting anything. It applies in agent mode too.
+2. **The most relevant passages** from the study index (below).
+
+PDFs you opened from a file or URL are read the first time you ask about them and remembered for the rest of the session. If a large PDF's text isn't ready within a few seconds, your message is sent without it and Socrates is told it's still being extracted; it's ready on your next message. Scanned PDFs without a text layer are not OCR'd on the send path.
+
+Cloud vendors receive the text that is shared. Only Ollama keeps everything on your machine.
+
+### The study index works without Ollama
+
+The index is a file on your device covering your **notes, library PDFs, calendar events and tasks**. It no longer needs Ollama or any particular AI vendor:
+
+- **Built-in index (default).** A small on-device embedder needs no setup, no network and no model download. It finds passages by shared wording, so it's great for "where did I write about X" and for dates and task names, but it doesn't understand synonyms.
+- **Semantic index (optional).** If Ollama is running with the embedding model (`ollama pull nomic-embed-text`), a rebuild uses it for meaning-based search. Settings → AI shows which one is active and offers **Upgrade to semantic index (Ollama)** when Ollama is reachable. If Ollama later goes away, search falls back to keywords until it's back; **Rebuild** switches to the built-in index.
+
+A single index only ever holds vectors from one of the two, and Hades records which. Index files from earlier versions still load.
+
+**It keeps itself up to date.** With AI enabled, Hades watches your notes, library, calendar and tasks and re-indexes only what changed: notes after you pause typing (about 4 seconds), events and tasks within about 1.5 seconds, new PDFs when they're added, and removals when you delete something. This covers every way something can appear: typing it yourself, an iCal feed sync, or Socrates creating events and tasks. The first index is built quietly in the background a few seconds after launch.
+
+Calendar events are indexed from 7 days ago to 120 days ahead, capped at 500 items, so a large timetable feed can't bloat the index. Dates and times in the index are in your local time zone.
+
+---
+
+## Agent mode: let Socrates act on the app
+
+Switch on **Agent mode** in **Settings → AI** and Socrates can act on your behalf: it replies with tool calls, Hades runs them and reports what happened. Tools are **additive only — nothing can be deleted**, and Socrates must tell you what it did. The same focus rule applies as in normal chat.
+
+| Tool | What it's for |
+|------|---------------|
+| `search_notes`, `read_note`, `list_notes`, `search_pdf` | Find and read your notes and library PDFs (`search_notes` also covers events and tasks) |
+| `read_open_note`, `list_open_notes` | The note in your active tab ("this note"), or every note open as a tab |
+| `read_open_pdf` | The PDF open in the Notes pane: the current page first, or a specific `page` |
+| `read_schedule` | Quick overview: open tasks and the next 14 days, plus weekly progress |
+| `query_schedule` | Events and tasks in a specific range (`from`, `to`, `include`, `limit`), e.g. "what's due before Friday" |
+| `create_task`, `create_tasks`, `add_calendar_event`, `create_note`, `create_flashcards` | Create things |
+| `control_timer`, `set_goal`, `switch_module`, `whats_new` | Run the timer, set the session goal, move around, explain what's new |
+| `get_study_stats` | Weekly goal and progress, today's focus time, Pomodoro cycle, session goal |
+| `update_study_stats` | On request only: set the weekly goal (1–100 hours), log focus time you already did (1–480 minutes), or set the session goal. Out-of-range numbers are clamped; invalid input changes nothing |
+
+All times Socrates reads or writes are in your local time zone.
 
 ---
 

@@ -1,6 +1,16 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { playSound } from "../lib/sound";
+import {
+  applyPlanLocally,
+  countPending,
+  sanitizeBase,
+  sanitizeTombstones,
+  type ReconcilePlan,
+  type SyncBase,
+  type Tombstones,
+} from "../lib/syncReconcile";
+import { nextAfterWorkComplete, needsCycleReset } from "../lib/pomodoroCycle";
 
 export type GroqModelId =
   | "llama-3.3-70b-versatile"
@@ -38,6 +48,10 @@ export type Theme =
   | "solarized-light"
   | "everforest"
   | "rosepine-dawn"
+  | "mono"
+  | "bluepaper"
+  | "honey"
+  | "pastel"
   | "ember"
   | "abyss"
   | "synthwave"
@@ -115,6 +129,29 @@ export interface NoteFile {
   isFolder: boolean;
   createdAt: string;
   updatedAt: string;
+}
+
+export type SyncStatus = "idle" | "syncing" | "offline" | "error";
+
+export interface SyncRuntime {
+  isSyncing: boolean;
+  syncStatus: SyncStatus;
+  syncError: string | null;
+  syncFailures: number;
+  nextSyncAt: number;
+  pendingCount: number;
+  hasPendingChanges: boolean;
+}
+
+export interface SyncSnapshot {
+  notes: readonly NoteFile[];
+  tombstones: Tombstones;
+  folder: string;
+}
+
+export interface SyncCommitResult {
+  applied: boolean;
+  skipped: string[];
 }
 
 export interface Task {
@@ -252,7 +289,11 @@ interface AppState {
   pomodoroMode: PomodoroMode;
   timeLeft: number;
   isRunning: boolean;
+  // Position in today's Pomodoro cycle, not a lifetime total — reset by
+  // rolloverIfNewDay. Lifetime/daily totals live in focusSessions.
   sessionsCompleted: number;
+  // Local YYYY-MM-DD of the last completed focus period; null = none yet.
+  lastSessionDate: string | null;
   workDuration: number;
   breakDuration: number;
   longBreakDuration: number;
@@ -275,6 +316,7 @@ interface AppState {
   weeklyGoalHours: number;
   setWeeklyGoalHours: (h: number) => void;
 
+  rolloverIfNewDay: () => void;
   startTimer: () => void;
   pauseTimer: () => void;
   resetTimer: () => void;
@@ -407,10 +449,22 @@ interface AppState {
   // Deletion tombstones (note/folder id → deletedAt ISO) so deletes propagate
   // to other devices instead of resurrecting on the next pull.
   deletedNoteIds: Record<string, string>;
+  // Random id of this installation; tie-breaks conflicts and names conflict copies.
+  syncDeviceId: string;
+  // Per-item state both sides agreed on at the last successful sync. Its diff
+  // against `notes` is the durable queue of changes still to be pushed.
+  syncBase: SyncBase;
+  // Choosing a folder always resets syncBase: it describes one specific folder.
   setSyncFolder: (path: string | null) => void;
   setSyncEnabled: (v: boolean) => void;
   setLastSyncAt: (ts: string | null) => void;
   setDeletedNoteIds: (m: Record<string, string>) => void;
+  ensureSyncDeviceId: () => string;
+  commitSyncResult: (snapshot: SyncSnapshot, plan: ReconcilePlan) => SyncCommitResult;
+  // Opt-in: share a live workspace snapshot with the external MCP server via
+  // <syncFolder>/.hades-bridge/ (see src/lib/workspaceBridge.ts).
+  mcpBridgeEnabled: boolean;
+  setMcpBridgeEnabled: (v: boolean) => void;
 
   // ── Sync runtime (ephemeral, not persisted) ────────────────────────────────
   isSyncing: boolean;
@@ -418,12 +472,17 @@ interface AppState {
   quitPending: boolean;
   forceQuit: boolean;
   syncError: string | null;
+  syncStatus: SyncStatus;
+  pendingCount: number;
+  syncFailures: number;
+  nextSyncAt: number;
   setIsSyncing: (v: boolean) => void;
   setHasPendingChanges: (v: boolean) => void;
   setQuitPending: (v: boolean) => void;
   setForceQuit: (v: boolean) => void;
   setSyncError: (msg: string | null) => void;
-  applyMergedNotes: (notes: NoteFile[]) => void;
+  patchSyncRuntime: (patch: Partial<SyncRuntime>) => void;
+  refreshPendingCount: () => void;
 
   // ── Updater (ephemeral, not persisted) ────────────────────────────────────
   updateAvailable: boolean;
@@ -441,6 +500,16 @@ interface AppState {
 
 function uid(): string {
   return Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+}
+
+function makeDeviceId(): string {
+  const bytes = new Uint8Array(8);
+  if (typeof crypto !== "undefined" && typeof crypto.getRandomValues === "function") {
+    crypto.getRandomValues(bytes);
+  } else {
+    for (let i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256);
+  }
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 function todayStr(): string {
@@ -544,6 +613,7 @@ export const useStore = create<AppState>()(
       timeLeft: 25 * 60,
       isRunning: false,
       sessionsCompleted: 0,
+      lastSessionDate: null,
       workDuration: 25,
       breakDuration: 5,
       longBreakDuration: 15,
@@ -559,9 +629,26 @@ export const useStore = create<AppState>()(
       weeklyGoalHours: 20,
       setWeeklyGoalHours: (weeklyGoalHours) => set({ weeklyGoalHours }),
 
+      rolloverIfNewDay: () => {
+        const s = get();
+        if (!needsCycleReset(s.lastSessionDate, s.sessionsCompleted, new Date())) return;
+        // A running countdown is never touched: it is the user's live session.
+        if (s.isRunning) {
+          set({ sessionsCompleted: 0, lastSessionDate: null });
+          return;
+        }
+        set({
+          sessionsCompleted: 0,
+          lastSessionDate: null,
+          pomodoroMode: "work",
+          timeLeft: s.workDuration * 60,
+        });
+      },
+
       startTimer: () => {
+        if (get().isRunning) return;
+        get().rolloverIfNewDay();
         const state = get();
-        if (state.isRunning) return;
 
         const endsAt = Date.now() + state.timeLeft * 1000;
 
@@ -588,27 +675,28 @@ export const useStore = create<AppState>()(
 
             playSound(s.soundType, s.soundVolume);
 
-            const sessions =
-              s.pomodoroMode === "work"
-                ? s.sessionsCompleted + 1
-                : s.sessionsCompleted;
+            // A period that started before midnight and ends after it belongs
+            // to the new day's cycle; the running timer itself is not touched.
+            get().rolloverIfNewDay();
+            const cycle = get();
 
-            let nextMode: PomodoroMode = "break";
-            if (s.pomodoroMode === "work") {
-              nextMode =
-                sessions % s.sessionsUntilLongBreak === 0
-                  ? "longBreak"
-                  : "break";
-            } else {
-              nextMode = "work";
-            }
+            const done =
+              s.pomodoroMode === "work"
+                ? nextAfterWorkComplete(
+                    cycle.lastSessionDate,
+                    cycle.sessionsCompleted,
+                    s.sessionsUntilLongBreak
+                  )
+                : null;
+            const nextMode: PomodoroMode = done ? done.nextMode : "work";
 
             set({
               isRunning: false,
               _intervalId: null,
               timerEndsAt: null,
               pomodoroMode: nextMode,
-              sessionsCompleted: sessions,
+              sessionsCompleted: done?.sessionsCompleted ?? cycle.sessionsCompleted,
+              lastSessionDate: done?.lastSessionDate ?? cycle.lastSessionDate,
               timeLeft:
                 nextMode === "work"
                   ? s.workDuration * 60
@@ -648,26 +736,26 @@ export const useStore = create<AppState>()(
       },
 
       skipSession: () => {
+        // Mode is read before the rollover: skipping what the user sees as a
+        // stale break must not be turned into a work completion by the reset.
+        const skippedMode = get().pomodoroMode;
+        get().rolloverIfNewDay();
         const s = get();
         if (s._intervalId) clearInterval(s._intervalId);
 
-        const sessions =
-          s.pomodoroMode === "work" ? s.sessionsCompleted + 1 : s.sessionsCompleted;
-
-        let nextMode: PomodoroMode = "break";
-        if (s.pomodoroMode === "work") {
-          nextMode =
-            sessions % s.sessionsUntilLongBreak === 0 ? "longBreak" : "break";
-        } else {
-          nextMode = "work";
-        }
+        const done =
+          skippedMode === "work"
+            ? nextAfterWorkComplete(s.lastSessionDate, s.sessionsCompleted, s.sessionsUntilLongBreak)
+            : null;
+        const nextMode: PomodoroMode = done ? done.nextMode : "work";
 
         set({
           isRunning: false,
           _intervalId: null,
           timerEndsAt: null,
           pomodoroMode: nextMode,
-          sessionsCompleted: sessions,
+          sessionsCompleted: done?.sessionsCompleted ?? s.sessionsCompleted,
+          lastSessionDate: done?.lastSessionDate ?? s.lastSessionDate,
           timeLeft:
             nextMode === "work"
               ? s.workDuration * 60
@@ -987,7 +1075,8 @@ export const useStore = create<AppState>()(
 
           // Record tombstones so the deletion propagates to other devices.
           const deletedNoteIds = { ...s.deletedNoteIds };
-          if (s.syncEnabled) {
+          // Also while sync is switched off once it has synced: the remote still holds the note.
+          if (s.syncEnabled || Object.keys(s.syncBase ?? {}).length > 0) {
             const now = new Date().toISOString();
             for (const did of toDelete) deletedNoteIds[did] = now;
           }
@@ -1014,8 +1103,10 @@ export const useStore = create<AppState>()(
           for (const id of restoreIds) delete deletedNoteIds[id];
           // Re-open the first restored note (if it's a note) for context.
           const firstNote = s.lastDeletedNotes.find((n) => !n.isFolder);
+          // A published tombstone outranks the old timestamps, so the restore counts as a fresh edit.
+          const restoredAt = new Date().toISOString();
           return {
-            notes: [...s.notes, ...s.lastDeletedNotes],
+            notes: [...s.notes, ...s.lastDeletedNotes.map((n) => ({ ...n, updatedAt: restoredAt }))],
             deletedNoteIds,
             lastDeletedNotes: null,
             activeNoteId: firstNote ? firstNote.id : s.activeNoteId,
@@ -1314,6 +1405,8 @@ export const useStore = create<AppState>()(
         set((s) => {
           const card = s.flashcards.find((c) => c.id === id);
           if (!card) return s;
+          // Drill sessions also rate cards that are not due yet; those ratings must not inflate intervals.
+          if (card.nextReview > todayStr()) return s;
 
           let { interval, easeFactor, repetitions } = card;
 
@@ -1414,22 +1507,78 @@ export const useStore = create<AppState>()(
       syncEnabled: false,
       lastSyncAt: null,
       deletedNoteIds: {},
-      setSyncFolder: (syncFolder) => set({ syncFolder }),
-      setSyncEnabled: (syncEnabled) => set({ syncEnabled }),
+      syncDeviceId: "",
+      syncBase: {},
+      setSyncFolder: (syncFolder) =>
+        set((s) => ({
+          syncFolder,
+          syncBase: {},
+          lastSyncAt: null,
+          syncStatus: "idle",
+          syncError: null,
+          syncFailures: 0,
+          nextSyncAt: 0,
+          pendingCount: countPending(s.notes, {}),
+        })),
+      setSyncEnabled: (syncEnabled) =>
+        set({ syncEnabled, syncStatus: "idle", syncError: null, syncFailures: 0, nextSyncAt: 0 }),
       setLastSyncAt: (lastSyncAt) => set({ lastSyncAt }),
       setDeletedNoteIds: (deletedNoteIds) => set({ deletedNoteIds }),
+      ensureSyncDeviceId: () => {
+        const cur = get().syncDeviceId;
+        if (typeof cur === "string" && /^[A-Za-z0-9]{8,64}$/.test(cur)) return cur;
+        const id = makeDeviceId();
+        set({ syncDeviceId: id });
+        return id;
+      },
+      commitSyncResult: (snapshot, plan) => {
+        let result: SyncCommitResult = { applied: false, skipped: [] };
+        set((s) => {
+          if (!s.syncEnabled || s.syncFolder !== snapshot.folder) return {};
+          const res = applyPlanLocally(
+            snapshot,
+            { notes: s.notes, tombstones: sanitizeTombstones(s.deletedNoteIds), base: sanitizeBase(s.syncBase) },
+            plan
+          );
+          result = { applied: true, skipped: res.skipped };
+          const removed = new Set(res.removedIds);
+          const openNoteIds = removed.size ? s.openNoteIds.filter((id) => !removed.has(id)) : s.openNoteIds;
+          const activeNoteId =
+            s.activeNoteId && removed.has(s.activeNoteId) ? openNoteIds[0] ?? null : s.activeNoteId;
+          const pendingCount = countPending(res.notes, res.base);
+          return {
+            ...(res.notes !== s.notes ? { notes: res.notes as NoteFile[], openNoteIds, activeNoteId } : {}),
+            ...(res.baseChanged ? { syncBase: res.base } : {}),
+            ...(res.tombstonesChanged ? { deletedNoteIds: res.tombstones } : {}),
+            pendingCount,
+            hasPendingChanges: pendingCount > 0,
+          };
+        });
+        return result;
+      },
+      mcpBridgeEnabled: false,
+      setMcpBridgeEnabled: (mcpBridgeEnabled) => set({ mcpBridgeEnabled }),
 
       isSyncing: false,
       hasPendingChanges: false,
       quitPending: false,
       forceQuit: false,
       syncError: null,
+      syncStatus: "idle",
+      pendingCount: 0,
+      syncFailures: 0,
+      nextSyncAt: 0,
       setIsSyncing: (isSyncing) => set({ isSyncing }),
       setHasPendingChanges: (hasPendingChanges) => set({ hasPendingChanges }),
       setQuitPending: (quitPending) => set({ quitPending }),
       setForceQuit: (forceQuit) => set({ forceQuit }),
       setSyncError: (syncError) => set({ syncError }),
-      applyMergedNotes: (notes) => set({ notes }),
+      patchSyncRuntime: (patch) => set(patch),
+      refreshPendingCount: () => {
+        const s = get();
+        const pendingCount = countPending(s.notes, s.syncBase);
+        if (pendingCount !== s.pendingCount) set({ pendingCount });
+      },
 
       // ── Updater ──────────────────────────────────────────────────────────
       updateAvailable:  false,
@@ -1567,6 +1716,10 @@ export const useStore = create<AppState>()(
         quitPending: false,
         forceQuit: false,
         syncError: null,
+        syncStatus: "idle",
+        pendingCount: 0,
+        syncFailures: 0,
+        nextSyncAt: 0,
         // Ephemeral updater state
         updateAvailable:  false,
         updateVersion:    null,

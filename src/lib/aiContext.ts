@@ -1,11 +1,14 @@
 import { useStore } from "../store/useStore";
-import { search } from "./ragIndex";
+import { search, type RagSourceType } from "./ragIndex";
+import { getActiveNote, getOpenPdfContext } from "./openDocs";
+import { fmtLocal, TZ } from "./localTime";
 
 // Hard cap so a large notebook can never blow the model's context window or run
 // up token cost. Notes are prioritised (active first, then most recently edited);
 // library PDFs contribute title/author only — full-text extraction is a future
 // enhancement, not part of the lightweight context-injection design.
 const MAX_CHARS = 8000;
+const OPEN_DOC_CAP = 6000;
 
 /**
  * Build a plain-text snapshot of the user's study material (notes + PDF library)
@@ -13,11 +16,12 @@ const MAX_CHARS = 8000;
  * nothing to share. Reads the store directly so callers don't need to thread
  * state through.
  */
-export function buildStudyContext(): string {
+export function buildStudyContext(opts: { skipNoteIds?: string[] } = {}): string {
   const s = useStore.getState();
+  const skip = new Set(opts.skipNoteIds ?? []);
 
   const notes = s.notes
-    .filter((n) => !n.isFolder && n.content.trim().length > 0)
+    .filter((n) => !n.isFolder && n.content.trim().length > 0 && !skip.has(n.id))
     .sort((a, b) => {
       if (a.id === s.activeNoteId) return -1;
       if (b.id === s.activeNoteId) return 1;
@@ -52,25 +56,96 @@ export function buildStudyContext(): string {
   return sections.join("\n\n").trim();
 }
 
+const SOURCE_LABEL: Record<RagSourceType, string> = { note: "Note", pdf: "PDF", event: "Event", task: "Task" };
+
 /**
- * Retrieve study context for a query. Prefers semantic RAG retrieval (Ollama
- * embeddings over the on-device index); transparently falls back to the
- * keyword/recency snapshot above when the index is empty or Ollama is down.
+ * Retrieve study context for a query from the on-device index (notes, PDFs,
+ * calendar events, tasks). Works with the built-in embedder, so no Ollama is
+ * needed; falls back to the keyword/recency snapshot above when the index has
+ * nothing relevant. `skipSourceIds` drops sources already shared in full.
  */
-export async function retrieveContext(query: string): Promise<string> {
+export async function retrieveContext(query: string, opts: { skipSourceIds?: string[] } = {}): Promise<string> {
+  const skip = new Set(opts.skipSourceIds ?? []);
   try {
-    const hits = await search(query, 6);
+    const hits = (await search(query, skip.size > 0 ? 10 : 6)).filter((h) => !skip.has(h.sourceId)).slice(0, 6);
     if (hits.length > 0) {
-      const blocks = hits.map(
-        (h) => `### ${h.sourceType === "pdf" ? "PDF" : "Note"}: ${h.sourceName}\n${h.text.trim()}`
-      );
+      const blocks = hits.map((h) => `### ${SOURCE_LABEL[h.sourceType]}: ${h.sourceName}\n${h.text.trim()}`);
+      const hasSchedule = hits.some((h) => h.sourceType === "event" || h.sourceType === "task");
+      const clock = hasSchedule
+        ? `\n\nCurrent local time: ${fmtLocal(new Date().toISOString())} (timezone: ${TZ}). Times in Event and Task entries are already local; report them as given.`
+        : "";
       return (
         blocks.join("\n\n") +
-        `\n\nWhen your answer draws on one of the sources above, cite it inline as [Note: <name>] or [PDF: <name>] using the exact source name. Only cite sources that actually appear above.`
+        clock +
+        `\n\nWhen your answer draws on one of the sources above, cite it inline as [Note: <name>], [PDF: <name>], [Event: <title>] or [Task: <text>] using the exact source name. Only cite sources that actually appear above.`
       );
     }
   } catch {
     /* fall through to the lightweight snapshot */
   }
-  return buildStudyContext();
+  return buildStudyContext({ skipNoteIds: opts.skipSourceIds });
+}
+
+export interface OpenDocumentContext {
+  text: string;
+  /** Sources whose full text is already in `text`, so retrieval can skip them. */
+  coveredSourceIds: string[];
+}
+
+function cap(text: string, max: number): { text: string; truncated: boolean } {
+  const t = text.trim();
+  return t.length > max ? { text: `${t.slice(0, max)}\n…(truncated)`, truncated: true } : { text: t, truncated: false };
+}
+
+/**
+ * What the user is looking at right now: the active note and the PDF open in
+ * the Notes pane. Shared on every turn (chat and agent mode) so "this note" /
+ * "this page" just work. The PDF text is bounded by a short timeout: if it is
+ * not ready, the message goes out without it and says so, while extraction
+ * carries on for the next turn. Never throws.
+ */
+export async function buildOpenDocumentContext(opts: { timeoutMs?: number } = {}): Promise<OpenDocumentContext> {
+  const sections: string[] = [];
+  const covered: string[] = [];
+
+  try {
+    const note = getActiveNote();
+    if (note) {
+      const body = cap(note.content, OPEN_DOC_CAP);
+      sections.push(`### Open note: ${note.name || "Untitled note"}\n${body.text || "(this note is empty)"}`);
+      if (!body.truncated) covered.push(note.id);
+    }
+  } catch {
+    /* skip the note block */
+  }
+
+  try {
+    const ctx = await getOpenPdfContext({ maxChars: OPEN_DOC_CAP, timeoutMs: opts.timeoutMs });
+    if (ctx) {
+      const { pdf } = ctx;
+      const where = pdf.currentPage
+        ? ` (viewing page ${pdf.currentPage}${pdf.pageCount ? ` of ${pdf.pageCount}` : ""})`
+        : "";
+      if (ctx.pending) {
+        sections.push(
+          `### Open PDF: ${pdf.title}${where}\nThe PDF's text is still being extracted, so it is NOT included in this message. It will be available on the next message; say so if the user asks about it.`
+        );
+      } else if (!pdf.text) {
+        sections.push(`### Open PDF: ${pdf.title}${where}\nNo selectable text was found in this PDF (it may be a scan).`);
+      } else {
+        sections.push(
+          `### Open PDF: ${pdf.title}${where}\nPages are labelled [Page N]; the page the user is on comes first.\n${pdf.text}${pdf.truncated ? "\n…(truncated — only part of the document is shown)" : ""}`
+        );
+        if (pdf.docId && !pdf.truncated) covered.push(pdf.docId);
+      }
+    }
+  } catch {
+    /* skip the PDF block */
+  }
+
+  if (sections.length === 0) return { text: "", coveredSourceIds: [] };
+  return {
+    text: `## Currently open in Hades (what the user is looking at right now)\n\n${sections.join("\n\n")}`,
+    coveredSourceIds: covered,
+  };
 }

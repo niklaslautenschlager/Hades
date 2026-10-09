@@ -25,6 +25,7 @@ export async function completeOnce(opts: {
         messages: [{ role: "user", content: opts.user }],
         unrestricted: false,
         agentSystem: opts.system, // replaces the base system prompt
+        oneShot: true, // the task prompt stands alone: no chat focus guard or reminder
         maxTokens: opts.maxTokens ?? 2048,
       },
       (delta) => { out += delta; },

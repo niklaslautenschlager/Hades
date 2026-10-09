@@ -1,6 +1,8 @@
 import { McpServer, ResourceTemplate } from "@modelcontextprotocol/server";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
+import { realpath } from "node:fs/promises";
 import * as z from "zod/v4";
+import { BridgeError, HadesBridge, buildSchedule, buildStats, isValidWhen } from "./bridge.js";
 import { HadesNotesStore, type HadesNote } from "./storage.js";
 
 const envSchema = z.object({
@@ -27,6 +29,16 @@ function toolFailure(error: unknown) {
   return { isError: true as const, content: [{ type: "text" as const, text: asText({ error: { code, message } }) }] };
 }
 
+function bridgeFailureMessage(error: unknown): string {
+  console.error(`[hades-mcp] ${error instanceof Error ? error.message : "Unexpected Hades bridge error."}`);
+  return error instanceof BridgeError ? error.message : "The Hades workspace bridge operation failed. Check the bridge folder and server diagnostics.";
+}
+
+function bridgeFailure(error: unknown) {
+  const code = error instanceof BridgeError ? error.code : "HADES_BRIDGE_FAILED";
+  return { isError: true as const, content: [{ type: "text" as const, text: asText({ error: { code, message: bridgeFailureMessage(error) } }) }] };
+}
+
 async function readNoteSafely(store: HadesNotesStore, id: string): Promise<HadesNote> {
   try { return await store.read(id); }
   catch (error) {
@@ -46,6 +58,8 @@ async function main(): Promise<void> {
   }
 
   const store = await HadesNotesStore.open(config.data.HADES_SYNC_FOLDER);
+  const bridgeDir = process.env.HADES_BRIDGE_DIR?.trim();
+  const bridge = HadesBridge.create(await realpath(config.data.HADES_SYNC_FOLDER), bridgeDir ? { bridgeDir } : {});
   const server = new McpServer({ name: "hades", version: "1.0.0" });
 
   server.registerTool("list_notes", {
@@ -107,6 +121,85 @@ async function main(): Promise<void> {
     } catch (error) { return toolFailure(error); }
   });
 
+  const whenSchema = z.string().trim().max(40).refine(isValidWhen, "Use an ISO-8601 date (2026-10-12) or datetime (2026-10-12T09:00:00+02:00).");
+
+  server.registerTool("query_schedule", {
+    title: "Query the Hades schedule",
+    description: "Read calendar events and open tasks from the running Hades app (requires the live workspace bridge). Defaults to events from now to 14 days ahead plus every open task. Dates without a time zone offset use the Hades user's time zone. When 'from' or 'to' is given, tasks are those due inside the window, completed ones included (check each task's 'completed' flag).",
+    inputSchema: z.object({
+      from: whenSchema.optional().describe("Start of the window (ISO-8601 date or datetime). Default: now."),
+      to: whenSchema.optional().describe("End of the window, inclusive; a date covers the whole day. Default: 14 days after 'from'."),
+      include: z.array(z.enum(["events", "tasks"])).min(1).max(2).optional().describe("Which lists to return. Default: both."),
+      limit: z.number().int().min(1).max(200).default(50),
+    }).strict(),
+    annotations: { readOnlyHint: true, openWorldHint: false },
+  }, async (args) => {
+    try { return { content: [{ type: "text", text: asText(await bridge.querySchedule(args)) }] }; }
+    catch (error) { return bridgeFailure(error); }
+  });
+
+  server.registerTool("list_open_notes", {
+    title: "List open Hades notes",
+    description: "List the notes currently open as editor tabs in the running Hades app (requires the live workspace bridge). Returns metadata only.",
+    inputSchema: z.object({}).strict(),
+    annotations: { readOnlyHint: true, openWorldHint: false },
+  }, async () => {
+    try { return { content: [{ type: "text", text: asText(await bridge.listOpenNotes()) }] }; }
+    catch (error) { return bridgeFailure(error); }
+  });
+
+  server.registerTool("read_open_note", {
+    title: "Read an open Hades note",
+    description: "Read the text of a note that is open in the running Hades app, as shown in the editor (requires the live workspace bridge). Long notes are truncated. Defaults to the active note.",
+    inputSchema: z.object({ id: idSchema.optional().describe("Note id from list_open_notes. Default: the active note.") }).strict(),
+    annotations: { readOnlyHint: true, openWorldHint: false },
+  }, async ({ id }) => {
+    try { return { content: [{ type: "text", text: asText(await bridge.readOpenNote(id)) }] }; }
+    catch (error) { return bridgeFailure(error); }
+  });
+
+  server.registerTool("read_open_pdf", {
+    title: "Read the open Hades PDF",
+    description: "Read extracted text of the PDF open in the Hades Notes PDF pane (requires the live workspace bridge). Returns the current page and the pages after it, up to maxChars. 'page' can only select pages included in the text Hades shared.",
+    inputSchema: z.object({
+      page: z.number().int().min(1).max(100_000).optional().describe("Page to centre the text on. Default: the page open in Hades."),
+      maxChars: z.number().int().min(200).max(50_000).optional().describe("Maximum characters to return. Default: 6000."),
+    }).strict(),
+    annotations: { readOnlyHint: true, openWorldHint: false },
+  }, async (args) => {
+    try { return { content: [{ type: "text", text: asText(await bridge.readOpenPdf(args)) }] }; }
+    catch (error) { return bridgeFailure(error); }
+  });
+
+  server.registerTool("get_study_stats", {
+    title: "Get Hades study stats",
+    description: "Read the weekly focus goal, hours focused this week, today's focus seconds, the Pomodoro cycle counter and the current session goal from the running Hades app (requires the live workspace bridge).",
+    inputSchema: z.object({}).strict(),
+    annotations: { readOnlyHint: true, openWorldHint: false },
+  }, async () => {
+    try { return { content: [{ type: "text", text: asText(await bridge.getStudyStats()) }] }; }
+    catch (error) { return bridgeFailure(error); }
+  });
+
+  server.registerTool("update_study_stats", {
+    title: "Update Hades study stats",
+    description: "Change the weekly focus goal, log extra focus minutes (adds to today's total and counts as one focus session), or set the current session goal in the running Hades app (requires the live workspace bridge). Nothing is deleted or reduced. Returns the new stats once Hades confirms.",
+    inputSchema: z.object({
+      weeklyGoalHours: z.number().min(1).max(100).optional(),
+      logFocusMinutes: z.number().int().min(1).max(480).optional().describe("Minutes of focus to add to today."),
+      goal: z.string().trim().min(1).max(200).optional().describe("Current session goal."),
+    }).strict().refine(
+      (value) => value.weeklyGoalHours !== undefined || value.logFocusMinutes !== undefined || value.goal !== undefined,
+      "Provide at least one of weeklyGoalHours, logFocusMinutes or goal.",
+    ),
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+  }, async (args) => {
+    try {
+      const { applied, stats } = await bridge.updateStudyStats(args);
+      return { content: [{ type: "text", text: asText({ updated: true, applied, stats }) }] };
+    } catch (error) { return bridgeFailure(error); }
+  });
+
   server.registerResource("notes", "hades://notes", {
     title: "Hades notes index",
     description: "Read-only metadata index for Markdown notes in Hades' cloud-sync folder.",
@@ -122,6 +215,24 @@ async function main(): Promise<void> {
   }, async (uri, { noteId }) => {
     const note = await readNoteSafely(store, String(noteId));
     return { contents: [{ uri: uri.href, mimeType: "text/markdown", text: note.content }] };
+  });
+
+  server.registerResource("schedule", "hades://schedule", {
+    title: "Hades schedule",
+    description: "Read-only upcoming events (next 14 days) and open tasks from the running Hades app (requires the live workspace bridge).",
+    mimeType: "application/json",
+  }, async (uri) => {
+    const view = await bridge.readSnapshot().catch((error: unknown) => { throw new Error(bridgeFailureMessage(error)); });
+    return { contents: [{ uri: uri.href, mimeType: "application/json", text: asText(buildSchedule(view, { limit: 200 }, Date.now())) }] };
+  });
+
+  server.registerResource("stats", "hades://stats", {
+    title: "Hades study stats",
+    description: "Read-only weekly goal, focus hours and Pomodoro cycle from the running Hades app (requires the live workspace bridge).",
+    mimeType: "application/json",
+  }, async (uri) => {
+    const view = await bridge.readSnapshot().catch((error: unknown) => { throw new Error(bridgeFailureMessage(error)); });
+    return { contents: [{ uri: uri.href, mimeType: "application/json", text: asText(buildStats(view)) }] };
   });
 
   server.registerPrompt("summarize_note", {

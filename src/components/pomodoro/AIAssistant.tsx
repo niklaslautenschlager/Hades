@@ -11,11 +11,11 @@ import {
   COMMANDS,
   AI_MODELS,
   VENDOR_LABELS,
-  APP_CONTEXT,
   DEEP_RESEARCH_COMMAND,
   type Command,
 } from "../../lib/ai";
-import { retrieveContext } from "../../lib/aiContext";
+import { APP_CONTEXT, buildSteeringHints, type SteeringHints } from "../../lib/aiPrompts";
+import { retrieveContext, buildOpenDocumentContext } from "../../lib/aiContext";
 import { renderAssistantHtml, handleCitationClick } from "../../lib/citations";
 import {
   buildAgentSystemPrompt,
@@ -259,7 +259,7 @@ export default function AIAssistant({ goal }: Props) {
   // One streamed turn. Streams deltas to the UI; resolves with the full text.
   function streamOnce(
     messages: { role: "user" | "assistant"; content: string }[],
-    extra: { deepResearch?: boolean; agentSystem?: string; studyContext?: string },
+    extra: { deepResearch?: boolean; agentSystem?: string; studyContext?: string; steering?: SteeringHints },
   ): Promise<string> {
     return new Promise((resolve, reject) => {
       let acc = "";
@@ -273,6 +273,7 @@ export default function AIAssistant({ goal }: Props) {
           unrestricted,
           appContext: APP_CONTEXT,
           studyContext: extra.studyContext,
+          steering: extra.steering,
           deepResearch: extra.deepResearch,
           agentSystem: extra.agentSystem,
           maxTokens: extra.deepResearch ? 4096 : extra.agentSystem ? 2048 : undefined,
@@ -293,16 +294,26 @@ export default function AIAssistant({ goal }: Props) {
     setError("");
 
     const agent = agentMode && !opts.deepResearch;
-    // In agent mode the model retrieves notes itself via search_notes; otherwise
-    // inject retrieved study context up front when enabled.
-    const studyContext =
-      !agent && aiUseStudyContext && opts.query ? (await retrieveContext(opts.query)) || undefined : undefined;
     const agentSystem = agent ? buildAgentSystemPrompt() : undefined;
 
     try {
+      // Gated on the study-context opt-in: it is what puts note/PDF/schedule
+      // content (and their titles, for focus steering) on the wire.
+      let studyContext: string | undefined;
+      let steering: SteeringHints | undefined;
+      if (aiUseStudyContext) {
+        steering = buildSteeringHints();
+        // The open note/PDF go in on every turn, agent mode included. In agent
+        // mode the model fetches anything else itself via search_notes.
+        const open = await buildOpenDocumentContext();
+        const rag =
+          !agent && opts.query ? await retrieveContext(opts.query, { skipSourceIds: open.coveredSourceIds }) : "";
+        studyContext = [open.text, rag].filter(Boolean).join("\n\n") || undefined;
+      }
+
       let messages = [...allMessages];
       for (let round = 0; ; round++) {
-        const text = await streamOnce(messages, { deepResearch: opts.deepResearch, agentSystem, studyContext });
+        const text = await streamOnce(messages, { deepResearch: opts.deepResearch, agentSystem, studyContext, steering });
         setStreamingContent("");
 
         if (!agent) {
