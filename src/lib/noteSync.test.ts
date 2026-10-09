@@ -13,6 +13,7 @@ vi.hoisted(() => {
 import { useStore, type NoteFile } from "../store/useStore";
 import {
   SYNC_BETA_NOTICE,
+  EDIT_DURING_SYNC_NOTICE,
   backoffMs,
   buildBackupJson,
   flushPendingForQuit,
@@ -950,6 +951,40 @@ describe("edits made while a sync is in flight", () => {
     expect(out.ok).toBe(true);
     expect(state().syncBase).toEqual({});
     expect(state().syncFolder).toBe("/somewhere/else");
+  });
+});
+
+describe("editing during a sync", () => {
+  // Jump the clock past the warning throttle so earlier mid-run tests don't mute it.
+  const later = (h: number) => vi.spyOn(Date, "now").mockReturnValue(Date.now() + h * 3600_000);
+  afterEach(() => vi.restoreAllMocks());
+  const notices = () => state().toasts.filter((t) => t.message === EDIT_DURING_SYNC_NOTICE);
+
+  it("does not warn when the only change is the engine pulling notes in", async () => {
+    const fs = new FakeFs();
+    setDevice({ notes: [mk("n1")] });
+    await syncNow({ fs });
+    setDevice({ syncDeviceId: DEVICE_B });
+    later(10);
+    await syncNow({ fs });
+    expect(noteById("n1")).toBeDefined();
+    expect(notices()).toHaveLength(0);
+  });
+
+  it("warns once when the user edits mid-run, and keeps the edit", async () => {
+    const fs = new FakeFs();
+    setDevice({ notes: [mk("n1")] });
+    later(20);
+    fs.onOp = (op) => {
+      if (op.op === "rename" && op.to!.endsWith(".md")) {
+        state().updateNote("n1", { content: "typed mid-sync" });
+        state().updateNote("n1", { content: "typed mid-sync, more" });
+      }
+    };
+    await syncNow({ fs });
+    fs.onOp = null;
+    expect(notices()).toHaveLength(1);
+    expect(noteById("n1")!.content).toBe("typed mid-sync, more");
   });
 });
 
