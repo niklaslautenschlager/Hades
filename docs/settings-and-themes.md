@@ -8,18 +8,28 @@ This page is the complete reference for everything in the **Settings** panel, pl
 
 ## Theme
 
-Hades ships **18 themes** in four packs. Pick one in **Settings → Theme**, or use the quick **palette icon** in the sidebar.
+Hades ships **22 themes** in five packs. Pick one in **Settings → Theme**, or use the quick **palette icon** in the sidebar.
 
 | Pack | Themes |
 |------|--------|
 | **Core** | Zinc Dark *(default)*, Paper, Catppuccin Mocha, Gruvbox, Nord |
 | **Popular** | Tokyo Night, Dracula, One Dark, Monokai Pro, Rosé Pine |
 | **Light & Classic** | Solarized Dark, Solarized Light, Everforest, Rosé Pine Dawn |
+| **Daylight** | Monochrome, Blue & Paper, Honeyed Naturals, Pastel |
 | **Hades Originals** | Ember, Abyss, Synthwave, Matrix |
 
-Each theme sets the whole app's colors plus an accent (used for highlights, the active-module pill, and subtle glows). **Paper**, **Solarized Light**, and **Rosé Pine Dawn** are light themes; the rest are dark.
+Each theme sets the whole app's colors plus an accent (used for highlights, the active-module pill, and subtle glows). **Paper**, **Solarized Light**, **Rosé Pine Dawn**, and the four **Daylight** themes are light themes; the rest are dark.
 
-> **Quick switch:** The sidebar palette popover groups themes into the same four packs and remembers which pack you last opened.
+The **Daylight** pack is made of light themes tuned for bright rooms and long reading sessions:
+
+| Theme | Look |
+|-------|------|
+| **Monochrome** | Charcoal ink on bright neutral white. Pure greyscale with a charcoal accent and very high text contrast. |
+| **Blue & Paper** | Soft indigo and navy accents over off-white paper, with blue-tinted borders and grid lines. |
+| **Honeyed Naturals** | Warm amber and honey accents with earthy taupe text on soft warm surfaces. |
+| **Pastel** | Low-saturation lavender, blush, and sage for a calm, low-fatigue look. Text stays dark and clearly readable. |
+
+> **Quick switch:** The sidebar palette popover groups themes into the same five packs and remembers which pack you last opened.
 
 ---
 

@@ -2,6 +2,17 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <!-- Paint the saved theme on first frame (App.tsx mirrors it to localStorage). Whitelist must match src/lib/themes.ts. -->
+    <script>
+      (function () {
+        try {
+          var t = localStorage.getItem("hades-theme");
+          if (/^(dark|light|catppuccin|gruvbox|nord|tokyonight|dracula|onedark|monokai|rosepine|solarized|solarized-light|everforest|rosepine-dawn|mono|bluepaper|honey|pastel|ember|abyss|synthwave|matrix)$/.test(t)) {
+            document.documentElement.setAttribute("data-theme", t);
+          }
+        } catch (e) {}
+      })();
+    </script>
     <link rel="icon" type="image/svg+xml" href="/hades.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Hades</title>

@@ -63,10 +63,11 @@ Built with [Tauri 2](https://v2.tauri.app) for native performance on macOS, Linu
 - All-time totals
 
 ### General
-- **18 themes** across four packs, with a collapsible theme picker and a bold per-theme accent system (gradients + glow):
+- **22 themes** across five packs, with a collapsible theme picker and a bold per-theme accent system (gradients + glow):
   - *Core* — Zinc Dark, Paper, Catppuccin Mocha, Gruvbox, Nord
   - *Popular* — Tokyo Night, Dracula, One Dark, Monokai Pro, Rosé Pine
   - *Light & Classic* — Solarized Dark/Light, Everforest, Rosé Pine Dawn
+  - *Daylight* — Monochrome, Blue & Paper, Honeyed Naturals, Pastel
   - *Hades Originals* — Ember, Abyss, Synthwave, Matrix
 - In-app updater via GitHub Releases (Linux/macOS/Windows aware)
 - Persistent state via Zustand + Tauri Store

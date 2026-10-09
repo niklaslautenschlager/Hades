@@ -28,7 +28,6 @@ import RelatedNotes from "./RelatedNotes";
 import DeletionUndoToast from "./DeletionUndoToast";
 import { exportAsMarkdown, exportAsPdf } from "../../lib/noteExport";
 import { importObsidianVault } from "../../lib/noteImport";
-import { indexNote } from "../../lib/ragIndex";
 import { generateFlashcardsFromText } from "../../lib/flashcardGen";
 import { tidyNote } from "../../lib/noteAssist";
 import { replaceAll, hasActiveEditor, insertIntoActiveNote } from "../../lib/editorBridge";
@@ -130,15 +129,10 @@ export default function NotepadModule() {
   }
   function onSidebarDividerPointerUp() { sidebarDragRef.current = null; }
 
-  const indexTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const handleContentChange = useCallback(
     (c: string) => {
       if (!activeNote) return;
       updateNote(activeNote.id, { content: c });
-      // Debounced re-index so RAG stays current (no-op until an index exists).
-      if (indexTimerRef.current) clearTimeout(indexTimerRef.current);
-      const snapshot = { ...activeNote, content: c, updatedAt: new Date().toISOString() };
-      indexTimerRef.current = setTimeout(() => { void indexNote(snapshot); }, 4000);
     },
     [activeNote, updateNote]
   );

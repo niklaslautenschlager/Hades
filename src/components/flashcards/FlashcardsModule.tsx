@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
   Plus,
   Trash2,
@@ -6,6 +6,7 @@ import {
   Play,
   ArrowLeft,
   RotateCcw,
+  Shuffle,
   Layers,
   BookOpen,
   X,
@@ -13,14 +14,33 @@ import {
 import { motion, AnimatePresence } from "framer-motion";
 import { useShallow } from "zustand/react/shallow";
 import { useStore, type FlashcardDeck, type Flashcard, type ReviewRating } from "../../store/useStore";
+import {
+  advance,
+  buildQueue,
+  isDue,
+  reviewControls,
+  type SessionMode,
+  type SessionState,
+} from "../../lib/flashcardSession";
 
 const DECK_COLORS = [
   "#3f3f46", "#ef4444", "#f97316", "#eab308",
   "#22c55e", "#06b6d4", "#3b82f6", "#a855f7",
 ];
 
+const RATINGS: { rating: ReviewRating; label: string; key: string; color: string }[] = [
+  { rating: 0, label: "Again", key: "1", color: "text-red-400 hover:bg-red-950/40" },
+  { rating: 2, label: "Hard", key: "2", color: "text-orange-400 hover:bg-orange-950/40" },
+  { rating: 3, label: "Good", key: "3", color: "text-green-400 hover:bg-green-950/40" },
+  { rating: 5, label: "Easy", key: "4", color: "text-blue-400 hover:bg-blue-950/40" },
+];
+
 function todayStr(): string {
   return new Date().toISOString().split("T")[0];
+}
+
+function plural(n: number, word: string): string {
+  return `${n} ${word}${n === 1 ? "" : "s"}`;
 }
 
 // ─── Review Session ──────────────────────────────────────────────────────────
@@ -28,79 +48,104 @@ function todayStr(): string {
 function ReviewSession({
   deck,
   cards,
+  mode,
   onExit,
+  onStart,
 }: {
   deck: FlashcardDeck;
   cards: Flashcard[];
+  mode: SessionMode;
   onExit: () => void;
+  onStart: (mode: SessionMode) => void;
 }) {
   const reviewFlashcard = useStore((s) => s.reviewFlashcard);
   const today = todayStr();
 
-  const dueCards = useMemo(
-    () => cards.filter((c) => c.nextReview <= today),
-    [cards, today]
-  );
-
-  const [currentIndex, setCurrentIndex] = useState(0);
+  // Frozen at mount: a rating moves nextReview in the store, which must never resize or reindex the running session.
+  const [session, setSession] = useState<SessionState>(() => ({
+    queue: buildQueue(cards, mode, todayStr(), { shuffle: mode === "all" }),
+    index: 0,
+  }));
+  const [startCount] = useState(session.queue.length);
   const [showBack, setShowBack] = useState(false);
-  const [reviewed, setReviewed] = useState(0);
 
-  const card = dueCards[currentIndex];
-  const total = dueCards.length;
+  const card = session.queue[session.index];
+  const total = session.queue.length;
 
-  function handleRate(rating: ReviewRating) {
-    if (!card) return;
-    reviewFlashcard(card.id, rating);
-    setShowBack(false);
-    setReviewed((v) => v + 1);
-    if (currentIndex + 1 < total) {
-      setCurrentIndex((v) => v + 1);
-    }
-  }
+  const handleRate = useCallback(
+    (rating: ReviewRating) => {
+      if (!card) return;
+      reviewFlashcard(card.id, rating);
+      setShowBack(false);
+      setSession(advance(session, rating));
+    },
+    [card, session, reviewFlashcard]
+  );
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
-      if (!card) return;
+      if (!card || e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
+      const target = e.target as HTMLElement | null;
+      if (target && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))) return;
       if (!showBack && (e.key === " " || e.key === "Enter")) {
         e.preventDefault();
         setShowBack(true);
         return;
       }
       if (showBack) {
-        if (e.key === "1") handleRate(0 as ReviewRating);
-        else if (e.key === "2") handleRate(2 as ReviewRating);
-        else if (e.key === "3") handleRate(3 as ReviewRating);
-        else if (e.key === "4") handleRate(5 as ReviewRating);
+        const match = RATINGS.find((r) => r.key === e.key);
+        if (match) handleRate(match.rating);
       }
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [showBack, card]);
+  }, [showBack, card, handleRate]);
 
-  if (!card || reviewed >= total) {
+  if (!card) {
+    const controls = reviewControls(cards, today);
+    const title =
+      controls.total === 0 ? "This deck is empty"
+      : startCount === 0 ? "No cards due"
+      : "Session complete!";
+    const body =
+      controls.total === 0
+        ? "Add a card to start studying."
+        : startCount === 0
+          ? `Nothing is scheduled for today. All ${plural(controls.total, "card")} are still in this deck. Drill them any time.`
+          : `You went through ${plural(startCount, "card")}. All ${controls.total} stay in the deck for drilling and future reviews.`;
+
     return (
-      <div className="flex flex-col items-center justify-center h-full gap-6">
+      <div className="flex flex-col items-center justify-center h-full gap-6 px-6">
         <div className="w-16 h-16 rounded-2xl bg-surface-hover flex items-center justify-center">
           <BookOpen className="w-7 h-7 text-foreground-secondary" />
         </div>
-        <div className="text-center">
-          <h2 className="text-lg font-semibold text-foreground">
-            {total === 0 ? "No cards due" : "Session complete!"}
-          </h2>
-          <p className="text-sm text-muted mt-1">
-            {total === 0
-              ? "All cards in this deck are up to date."
-              : `You reviewed ${reviewed} card${reviewed !== 1 ? "s" : ""}.`}
-          </p>
+        <div className="text-center max-w-sm">
+          <h2 className="text-lg font-semibold text-foreground">{title}</h2>
+          <p className="text-sm text-muted mt-1">{body}</p>
         </div>
-        <button onClick={onExit} className="btn-primary flex items-center gap-2">
-          <ArrowLeft className="w-4 h-4" />
-          Back to decks
-        </button>
+        <div className="flex flex-wrap items-center justify-center gap-3">
+          {controls.canDrill && (
+            <button onClick={() => onStart("all")} className="btn-primary flex items-center gap-2">
+              {mode === "all" ? <RotateCcw className="w-4 h-4" /> : <Shuffle className="w-4 h-4" />}
+              {mode === "all" ? "Drill again" : "Drill all cards"} ({controls.total})
+            </button>
+          )}
+          {controls.canReviewDue && (
+            <button onClick={() => onStart("due")} className="btn-ghost flex items-center gap-2">
+              <Play className="w-4 h-4" />
+              Review due ({controls.due})
+            </button>
+          )}
+          <button onClick={onExit} className="btn-ghost flex items-center gap-2">
+            <ArrowLeft className="w-4 h-4" />
+            Back to deck
+          </button>
+        </div>
       </div>
     );
   }
+
+  const live = cards.find((c) => c.id === card.id) ?? card;
 
   return (
     <div className="flex flex-col h-full">
@@ -111,13 +156,16 @@ function ReviewSession({
           {deck.name}
         </button>
         <div className="flex items-center gap-3">
+          <span className="text-xs px-2 py-0.5 rounded-md bg-surface-hover text-muted">
+            {mode === "all" ? "Drill" : "Review"}
+          </span>
           <span className="text-xs text-muted">
-            {currentIndex + 1} / {total}
+            {session.index + 1} / {total}
           </span>
           <div className="w-32 h-1.5 bg-surface-hover rounded-full overflow-hidden">
             <div
               className="h-full bg-accent-gradient rounded-full transition-all duration-300"
-              style={{ width: `${((currentIndex + 1) / total) * 100}%` }}
+              style={{ width: `${((session.index + 1) / total) * 100}%` }}
             />
           </div>
         </div>
@@ -126,7 +174,7 @@ function ReviewSession({
       {/* Card */}
       <div className="flex-1 flex items-center justify-center p-8">
         <motion.div
-          key={card.id + (showBack ? "-back" : "-front")}
+          key={`${session.index}-${card.id}-${showBack ? "back" : "front"}`}
           initial={{ opacity: 0, rotateY: showBack ? -90 : 0 }}
           animate={{ opacity: 1, rotateY: 0 }}
           transition={{ duration: 0.3 }}
@@ -145,6 +193,9 @@ function ReviewSession({
           {!showBack && (
             <p className="text-xs text-muted mt-6">Click to reveal · Space</p>
           )}
+          {!isDue(live, today) && (
+            <p className="text-[11px] text-muted mt-4">Not due · rating won't change its schedule</p>
+          )}
         </motion.div>
       </div>
 
@@ -158,12 +209,7 @@ function ReviewSession({
             className="flex items-center justify-center gap-3 px-6 py-5 border-t border-border flex-shrink-0"
           >
             <span className="text-xs text-muted mr-2">How well did you know it?</span>
-            {([
-              { rating: 0 as ReviewRating, label: "Again", key: "1", color: "text-red-400 hover:bg-red-950/40" },
-              { rating: 2 as ReviewRating, label: "Hard", key: "2", color: "text-orange-400 hover:bg-orange-950/40" },
-              { rating: 3 as ReviewRating, label: "Good", key: "3", color: "text-green-400 hover:bg-green-950/40" },
-              { rating: 5 as ReviewRating, label: "Easy", key: "4", color: "text-blue-400 hover:bg-blue-950/40" },
-            ]).map(({ rating, label, key, color }) => (
+            {RATINGS.map(({ rating, label, key, color }) => (
               <button
                 key={rating}
                 onClick={() => handleRate(rating)}
@@ -293,7 +339,7 @@ function DeckView({
 }: {
   deck: FlashcardDeck;
   onBack: () => void;
-  onReview: () => void;
+  onReview: (mode: SessionMode) => void;
 }) {
   const { flashcards, deleteFlashcard } = useStore(
     useShallow((s) => ({
@@ -304,7 +350,7 @@ function DeckView({
 
   const cards = flashcards.filter((c) => c.deckId === deck.id);
   const today = todayStr();
-  const dueCount = cards.filter((c) => c.nextReview <= today).length;
+  const controls = reviewControls(cards, today);
   const [addModal, setAddModal] = useState(false);
   const [editCard, setEditCard] = useState<Flashcard | null>(null);
 
@@ -318,13 +364,25 @@ function DeckView({
           </button>
           <div className="w-3 h-3 rounded-sm" style={{ background: deck.color }} />
           <h1 className="text-sm font-semibold text-foreground">{deck.name}</h1>
-          <span className="text-xs text-muted">{cards.length} cards</span>
+          <span className="text-xs text-muted">
+            {plural(controls.total, "card")}
+            {controls.canReviewDue && ` · ${controls.due} due`}
+          </span>
         </div>
         <div className="flex items-center gap-2">
-          {dueCount > 0 && (
-            <button onClick={onReview} className="btn-primary flex items-center gap-1.5 text-sm">
+          {controls.canReviewDue && (
+            <button onClick={() => onReview("due")} className="btn-primary flex items-center gap-1.5 text-sm">
               <Play className="w-3.5 h-3.5" />
-              Review ({dueCount})
+              Review due ({controls.due})
+            </button>
+          )}
+          {controls.canDrill && (
+            <button
+              onClick={() => onReview("all")}
+              className={`${controls.canReviewDue ? "btn-ghost" : "btn-primary"} flex items-center gap-1.5 text-sm`}
+            >
+              <Shuffle className="w-3.5 h-3.5" />
+              Drill all ({controls.total})
             </button>
           )}
           <button onClick={() => setAddModal(true)} className="btn-ghost flex items-center gap-1.5 text-sm">
@@ -350,11 +408,11 @@ function DeckView({
                 </div>
                 <div className="flex items-center gap-2 flex-shrink-0">
                   <span className={`text-xs px-2 py-0.5 rounded-md ${
-                    card.nextReview <= today
+                    isDue(card, today)
                       ? "bg-red-950/30 text-red-400"
                       : "bg-surface-hover text-muted"
                   }`}>
-                    {card.nextReview <= today ? "Due" : `${card.interval}d`}
+                    {isDue(card, today) ? "Due" : `${card.interval}d`}
                   </span>
                   <button
                     onClick={() => setEditCard(card)}
@@ -403,7 +461,7 @@ export default function FlashcardsModule() {
   );
 
   const [activeDeckId, setActiveDeckId] = useState<string | null>(null);
-  const [reviewing, setReviewing] = useState(false);
+  const [session, setSession] = useState<{ mode: SessionMode; run: number } | null>(null);
   const [newDeckName, setNewDeckName] = useState("");
   const [newDeckColor, setNewDeckColor] = useState(DECK_COLORS[0]);
   const [showNewDeck, setShowNewDeck] = useState(false);
@@ -414,12 +472,20 @@ export default function FlashcardsModule() {
   const deckCards = activeDeck ? flashcards.filter((c) => c.deckId === activeDeck.id) : [];
   const today = todayStr();
 
-  if (activeDeck && reviewing) {
+  // `run` is part of the key so "Drill again" mounts a fresh session with a freshly built queue.
+  function startSession(mode: SessionMode) {
+    setSession((prev) => ({ mode, run: (prev?.run ?? 0) + 1 }));
+  }
+
+  if (activeDeck && session) {
     return (
       <ReviewSession
+        key={session.run}
         deck={activeDeck}
         cards={deckCards}
-        onExit={() => setReviewing(false)}
+        mode={session.mode}
+        onExit={() => setSession(null)}
+        onStart={startSession}
       />
     );
   }
@@ -429,7 +495,7 @@ export default function FlashcardsModule() {
       <DeckView
         deck={activeDeck}
         onBack={() => setActiveDeckId(null)}
-        onReview={() => setReviewing(true)}
+        onReview={startSession}
       />
     );
   }
@@ -447,8 +513,8 @@ export default function FlashcardsModule() {
         <div>
           <h1 className="text-sm font-semibold text-foreground">Flashcards</h1>
           <p className="text-xs text-muted mt-0.5">
-            {flashcardDecks.length} deck{flashcardDecks.length !== 1 ? "s" : ""} ·{" "}
-            {flashcards.filter((c) => c.nextReview <= today).length} due today
+            {plural(flashcardDecks.length, "deck")} · {plural(flashcards.length, "card")} ·{" "}
+            {flashcards.filter((c) => isDue(c, today)).length} due today
           </p>
         </div>
         <button onClick={() => setShowNewDeck(true)} className="btn-primary flex items-center gap-1.5 text-sm">
@@ -513,7 +579,7 @@ export default function FlashcardsModule() {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {flashcardDecks.map((deck) => {
               const cards = flashcards.filter((c) => c.deckId === deck.id);
-              const dueCount = cards.filter((c) => c.nextReview <= today).length;
+              const dueCount = cards.filter((c) => isDue(c, today)).length;
 
               return (
                 <motion.div
@@ -569,7 +635,7 @@ export default function FlashcardsModule() {
                     </div>
                   </div>
                   <div className="flex items-center gap-3 text-xs text-muted">
-                    <span>{cards.length} cards</span>
+                    <span>{plural(cards.length, "card")}</span>
                     {dueCount > 0 && (
                       <span className="text-red-400 font-medium">{dueCount} due</span>
                     )}

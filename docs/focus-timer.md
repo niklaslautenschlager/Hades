@@ -10,20 +10,22 @@ It's the **Focus** icon (clock) at the top of the sidebar — and the screen Had
 
 ## The basics
 
-The Focus screen shows a large **progress ring** with the time remaining in the center, the current mode (Work / Break / Long break), and your session count.
+The Focus screen shows a large **progress ring** with the time remaining in the center, the current mode (Work / Break / Long break), and a row of progress bars with the number of focus sessions you've finished **today**.
 
 | Button | What it does |
 |--------|--------------|
 | **Start** | Begins the countdown. |
 | **Pause** | Stops the countdown, keeping the time remaining. |
 | **Reset** | Restores the current interval to its full length. |
-| **Skip** | Jumps to the next interval (counts as completing the current work session). |
+| **Skip** | Jumps to the next interval. Skipping a work interval moves the cycle forward (it counts toward your long break) but is not recorded in [Statistics](statistics.md). |
 
 ### How the cycle works
 
 1. **Work** interval (default **25 min**) → when it ends, a sound plays.
 2. **Short break** (default **5 min**).
 3. Repeat. After every **4** work sessions (configurable), you get a **Long break** (default **15 min**) instead of a short one.
+
+**The cycle restarts every day.** The count of finished work sessions is tied to your local calendar date. If you stopped yesterday one session short of a long break, today's first session starts a fresh cycle and is followed by a short break. When you open Hades (or return to it) on a new day, a leftover break from yesterday is reset to a Focus interval — unless a timer is already running, which is never interrupted. A work interval that starts before midnight and finishes after it counts as the first session of the new day.
 
 You can change all of these in **[Settings → Timer Intervals](settings-and-themes.md#timer-intervals)**.
 

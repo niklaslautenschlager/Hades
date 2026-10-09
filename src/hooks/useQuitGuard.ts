@@ -1,46 +1,48 @@
 import { useEffect } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useStore } from "../store/useStore";
-import { fullSync } from "../lib/noteSync";
+import { flushPendingForQuit } from "../lib/noteSync";
+import { countPending } from "../lib/syncReconcile";
 
 export function useQuitGuard() {
   useEffect(() => {
     let unlisten: (() => void) | undefined;
+    let disposed = false;
 
     getCurrentWindow().onCloseRequested(async event => {
       const s = useStore.getState();
 
-      // Let it close if sync is off, no pending changes, or user already force-quit
-      if (s.forceQuit || !s.syncEnabled || !s.syncFolder || !s.hasPendingChanges) {
+      // Let it close if sync is off, nothing is waiting to be pushed, or the user already chose to quit
+      if (s.forceQuit || !s.syncEnabled || !s.syncFolder || countPending(s.notes, s.syncBase) === 0) {
         s.setForceQuit(false);
         return;
       }
 
       event.preventDefault();
       s.setQuitPending(true);
-      s.setIsSyncing(true);
-      s.setSyncError(null);
 
-      try {
-        const fresh = useStore.getState();
-        await fullSync(fresh.syncFolder!, fresh.notes);
-        useStore.getState().setLastSyncAt(new Date().toISOString());
-        useStore.getState().setHasPendingChanges(false);
-      } catch (e) {
-        useStore.getState().setSyncError(e instanceof Error ? e.message : String(e));
-        // Don't auto-close on error — let the user decide via the overlay
-        useStore.getState().setIsSyncing(false);
-        return;
-      }
+      const outcome = await flushPendingForQuit();
+      // On failure the overlay shows the error; the user decides between Retry and Quit anyway
+      if (!outcome.ok) return;
 
-      useStore.getState().setIsSyncing(false);
       useStore.getState().setQuitPending(false);
 
       // Set forceQuit so the re-triggered CloseRequested doesn't loop
       useStore.getState().setForceQuit(true);
-      await getCurrentWindow().close();
-    }).then(fn => { unlisten = fn; });
+      try {
+        await getCurrentWindow().close();
+      } catch (e) {
+        useStore.getState().setForceQuit(false);
+        useStore.getState().setSyncError(e instanceof Error ? e.message : String(e));
+      }
+    }).then(fn => {
+      if (disposed) fn();
+      else unlisten = fn;
+    }).catch(() => {});
 
-    return () => { unlisten?.(); };
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
   }, []);
 }

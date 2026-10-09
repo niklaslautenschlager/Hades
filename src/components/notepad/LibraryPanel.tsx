@@ -9,7 +9,6 @@ import {
   deleteLibraryFile,
   formatBytes,
 } from "../../lib/pdfLibrary";
-import { indexLibraryDoc, removeFromIndex } from "../../lib/ragIndex";
 
 export default function LibraryPanel() {
   const {
@@ -52,8 +51,6 @@ export default function LibraryPanel() {
       for (const p of paths) {
         const doc = await importPdfFromPath(p);
         addLibraryDoc(doc);
-        // Best-effort: fold the new PDF into the study index if one exists.
-        void indexLibraryDoc(doc);
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -78,7 +75,6 @@ export default function LibraryPanel() {
   async function handleDelete(doc: LibraryDoc) {
     await deleteLibraryFile(doc);
     removeLibraryDoc(doc.id);
-    void removeFromIndex(doc.id);
   }
 
   return (

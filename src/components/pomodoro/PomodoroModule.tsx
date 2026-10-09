@@ -208,7 +208,7 @@ export default function PomodoroModule() {
               }`}
             />
           ))}
-          <span className="ml-2 text-xs text-muted">{sessionsCompleted} completed</span>
+          <span className="ml-2 text-xs text-muted">{sessionsCompleted} today</span>
         </div>
 
         {/* Controls */}

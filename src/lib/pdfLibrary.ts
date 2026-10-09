@@ -57,24 +57,31 @@ async function extractMetadata(bytes: Uint8Array): Promise<PdfMeta> {
 // Extract all selectable text from a PDF, page by page (text layer only).
 // Returns "" for scanned/image-only PDFs (no text layer).
 export async function extractPdfText(bytes: Uint8Array): Promise<string> {
+  const { pages } = await extractPdfPages(bytes);
+  return pages.filter((t) => t.trim()).join("\n\n");
+}
+
+/**
+ * Per-page text layer: `pages[p - 1]` is page p ("" when it has no text).
+ * Never throws; a failure yields `pageCount: 0`.
+ */
+export async function extractPdfPages(bytes: Uint8Array): Promise<{ pages: string[]; pageCount: number }> {
   try {
     const pdfjs = await import("pdfjs-dist");
     pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
     const task = pdfjs.getDocument({ data: new Uint8Array(bytes) });
     const doc = await task.promise;
-    const parts: string[] = [];
-    for (let p = 1; p <= doc.numPages; p++) {
+    const pageCount = doc.numPages;
+    const pages: string[] = [];
+    for (let p = 1; p <= pageCount; p++) {
       const page = await doc.getPage(p);
       const content = await page.getTextContent();
-      const text = content.items
-        .map((it) => ("str" in it ? (it as { str: string }).str : ""))
-        .join(" ");
-      if (text.trim()) parts.push(text);
+      pages.push(content.items.map((it) => ("str" in it ? (it as { str: string }).str : "")).join(" "));
     }
     await doc.destroy();
-    return parts.join("\n\n");
+    return { pages, pageCount };
   } catch {
-    return "";
+    return { pages: [], pageCount: 0 };
   }
 }
 
@@ -228,13 +235,21 @@ export async function libraryDocBlobUrl(doc: LibraryDoc): Promise<string> {
   return URL.createObjectURL(blob);
 }
 
-/** The hidden extracted text for a doc — from cache, extracting on a miss. */
-export async function libraryDocText(doc: LibraryDoc): Promise<string> {
+/** The hidden extracted text if it is cached, "" otherwise. Never extracts. */
+export async function libraryDocCachedText(doc: LibraryDoc): Promise<string> {
   try {
     const buf = await invoke<ArrayBuffer>("app_data_read", { relPath: textRelPath(doc.id) });
     const text = new TextDecoder().decode(new Uint8Array(buf));
-    if (text.trim()) return text;
-  } catch { /* cache miss */ }
+    return text.trim() ? text : "";
+  } catch {
+    return "";
+  }
+}
+
+/** The hidden extracted text for a doc — from cache, extracting on a miss. */
+export async function libraryDocText(doc: LibraryDoc): Promise<string> {
+  const cachedText = await libraryDocCachedText(doc);
+  if (cachedText) return cachedText;
   const { text } = await extractPdfMarkdown(await libraryDocBytes(doc), { name: doc.title || doc.fileName });
   try {
     await invoke("app_data_write", {

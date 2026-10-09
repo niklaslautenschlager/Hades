@@ -69,12 +69,11 @@ function getMotivationalQuote(progress: number): string {
 }
 
 export default function StatsModule() {
-  const { focusSessions, weeklyGoalHours, setWeeklyGoalHours, sessionsCompleted } = useStore(
+  const { focusSessions, weeklyGoalHours, setWeeklyGoalHours } = useStore(
     useShallow((s) => ({
       focusSessions: s.focusSessions,
       weeklyGoalHours: s.weeklyGoalHours,
       setWeeklyGoalHours: s.setWeeklyGoalHours,
-      sessionsCompleted: s.sessionsCompleted,
     }))
   );
 
@@ -276,7 +275,7 @@ export default function StatsModule() {
                 <p className="text-xs text-muted">total focus time</p>
               </div>
               <div>
-                <p className="text-2xl font-semibold text-foreground">{stats.total.sessions + sessionsCompleted}</p>
+                <p className="text-2xl font-semibold text-foreground">{stats.total.sessions}</p>
                 <p className="text-xs text-muted">sessions completed</p>
               </div>
               <div>

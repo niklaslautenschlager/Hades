@@ -1,15 +1,16 @@
-import { useState, useEffect } from "react";
-import { X, Key, Timer, Eye, EyeOff, Cpu, Volume2, Play, Palette, CalendarClock, Sliders, Cloud, FolderOpen, CloudOff, RefreshCw, Download, RotateCw, ArrowUpCircle, Sparkles, AlertTriangle, Trash2, BookOpen, Database, Bot } from "lucide-react";
+import { useState, useEffect, useSyncExternalStore } from "react";
+import { X, Key, Timer, Eye, EyeOff, Cpu, Volume2, Play, Palette, CalendarClock, Sliders, Cloud, RefreshCw, Download, RotateCw, ArrowUpCircle, Sparkles, AlertTriangle, Trash2, BookOpen, Database, Bot } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useShallow } from "zustand/react/shallow";
-import { open, ask } from "@tauri-apps/plugin-dialog";
+import { ask } from "@tauri-apps/plugin-dialog";
 import { useStore, type SoundType, type AIVendor } from "../../store/useStore";
 import { AI_MODELS, VENDOR_LABELS, VENDOR_KEY_URLS, VENDOR_INFO, VENDOR_TIER_LABELS } from "../../lib/ai";
-import { getRagStatus, rebuildIndex, clearIndex, EMBED_MODEL } from "../../lib/ragIndex";
+import { getRagStatus, rebuildIndex, clearIndex, type RagStatus } from "../../lib/ragIndex";
 import { THEMES, THEME_GROUPS } from "../../lib/themes";
 import { previewSound } from "../../lib/sound";
-import { fullSync } from "../../lib/noteSync";
+import SyncSettings, { BetaBadge } from "./SyncSettings";
 import { installUpdate, restartApp, hostPlatform } from "../../lib/updater";
+import { getBridgeStatus, subscribeBridgeStatus } from "../../lib/workspaceBridge";
 
 interface Props {
   onClose: () => void;
@@ -65,16 +66,6 @@ export default function SettingsModal({ onClose }: Props) {
     weeklyGoalHours,
     setWeeklyGoalHours,
     syncFolder,
-    syncEnabled,
-    lastSyncAt,
-    isSyncing,
-    setSyncFolder,
-    setSyncEnabled,
-    setLastSyncAt,
-    setIsSyncing,
-    setHasPendingChanges,
-    setSyncError,
-    notes,
     updateAvailable,
     updateVersion,
     updateChangelog,
@@ -125,16 +116,6 @@ export default function SettingsModal({ onClose }: Props) {
       weeklyGoalHours: s.weeklyGoalHours,
       setWeeklyGoalHours: s.setWeeklyGoalHours,
       syncFolder:           s.syncFolder,
-      syncEnabled:          s.syncEnabled,
-      lastSyncAt:           s.lastSyncAt,
-      isSyncing:            s.isSyncing,
-      setSyncFolder:        s.setSyncFolder,
-      setSyncEnabled:       s.setSyncEnabled,
-      setLastSyncAt:        s.setLastSyncAt,
-      setIsSyncing:         s.setIsSyncing,
-      setHasPendingChanges: s.setHasPendingChanges,
-      setSyncError:         s.setSyncError,
-      notes:                s.notes,
       updateAvailable:      s.updateAvailable,
       updateVersion:        s.updateVersion,
       updateChangelog:      s.updateChangelog,
@@ -170,42 +151,39 @@ export default function SettingsModal({ onClose }: Props) {
   const [tab, setTab] = useState<Tab>("ai");
 
   // Study (RAG) index status, loaded lazily for the AI tab.
-  const [ragChunks, setRagChunks] = useState<number | null>(null);
-  const [ragBuilt, setRagBuilt] = useState<string | null>(null);
-  const [ragStale, setRagStale] = useState(0);
+  const [ragStatus, setRagStatus] = useState<RagStatus | null>(null);
   const [ragBusy, setRagBusy] = useState(false);
   const [ragMsg, setRagMsg] = useState<string | null>(null);
   const ocrEscalations = useStore((s) => s.ocrEscalations);
   const ocrLog = useStore((s) => s.ocrLog);
+  const mcpBridgeEnabled = useStore((s) => s.mcpBridgeEnabled);
+  const setMcpBridgeEnabled = useStore((s) => s.setMcpBridgeEnabled);
+  const bridgeStatus = useSyncExternalStore(subscribeBridgeStatus, getBridgeStatus);
 
   useEffect(() => {
     if (tab !== "ai") return;
     let alive = true;
-    getRagStatus().then((s) => {
-      if (!alive) return;
-      setRagChunks(s.chunks);
-      setRagBuilt(s.lastBuilt);
-      setRagStale(s.staleNotes);
-    });
-    return () => { alive = false; };
+    // Polled so a background build started by auto-indexing is visible here.
+    const load = () => {
+      getRagStatus()
+        .then((s) => { if (alive) setRagStatus(s); })
+        .catch(() => { /* status is informational */ });
+    };
+    load();
+    const timer = setInterval(load, 5000);
+    return () => { alive = false; clearInterval(timer); };
   }, [tab]);
 
-  async function handleRebuildIndex() {
+  async function handleRebuildIndex(embedder: "auto" | "ollama" = "auto") {
     setRagBusy(true);
     setRagMsg(null);
     try {
-      const count = await rebuildIndex();
-      setRagChunks(count);
-      setRagBuilt(new Date().toISOString());
-      setRagStale(0);
-      setRagMsg(`Indexed ${count} chunk${count === 1 ? "" : "s"}.`);
+      const count = await rebuildIndex(undefined, { embedder });
+      const status = await getRagStatus();
+      setRagStatus(status);
+      setRagMsg(`Indexed ${count} chunk${count === 1 ? "" : "s"} with ${status.embedder?.label ?? "the built-in index"}.`);
     } catch (e) {
-      const raw = e instanceof Error ? e.message : String(e);
-      setRagMsg(
-        /connect|refused|fetch|request failed|embedding/i.test(raw)
-          ? `Couldn't reach Ollama embeddings. Run \`ollama pull ${EMBED_MODEL}\` and make sure Ollama is running.`
-          : raw
-      );
+      setRagMsg(e instanceof Error ? e.message : String(e));
     } finally {
       setRagBusy(false);
     }
@@ -296,6 +274,7 @@ export default function SettingsModal({ onClose }: Props) {
                   >
                     <Icon className="w-3.5 h-3.5 flex-shrink-0" />
                     {t.label}
+                    {t.id === "sync" && <BetaBadge className="ml-auto" />}
                     {t.id === "advanced" && updateAvailable && (
                       <span className="ml-auto w-1.5 h-1.5 rounded-full bg-green-500" />
                     )}
@@ -552,7 +531,7 @@ export default function SettingsModal({ onClose }: Props) {
               <div className="mt-3 space-y-2.5">
                 <Toggle
                   label="Use my notes as context"
-                  description="Semantically retrieves from your notes & PDF library when you chat. Only fully private with Ollama — cloud vendors receive the retrieved text."
+                  description="Shares your open note and PDF, plus the most relevant notes, PDF passages, calendar events and tasks, with the assistant when you chat. Only fully private with Ollama — cloud vendors receive that text."
                   value={aiUseStudyContext}
                   onChange={setAiUseStudyContext}
                 />
@@ -563,15 +542,15 @@ export default function SettingsModal({ onClose }: Props) {
                     <div className="flex items-center gap-2 min-w-0">
                       <Database className="w-3.5 h-3.5 text-muted flex-shrink-0" />
                       <span className="text-xs text-foreground-secondary truncate">
-                        {ragChunks === null
+                        {ragStatus === null
                           ? "Study index"
-                          : ragChunks === 0
-                          ? "Study index — empty"
-                          : `${ragChunks} chunk${ragChunks === 1 ? "" : "s"}${ragBuilt ? ` · ${new Date(ragBuilt).toLocaleDateString()}` : ""}${ragStale > 0 ? ` · ${ragStale} note${ragStale === 1 ? "" : "s"} not indexed` : ""}`}
+                          : !ragStatus.embedder
+                          ? "Study index — not built yet"
+                          : `${ragStatus.chunks} chunk${ragStatus.chunks === 1 ? "" : "s"}${ragStatus.lastBuilt ? ` · ${new Date(ragStatus.lastBuilt).toLocaleDateString()}` : ""}${ragStatus.pending > 0 ? ` · ${ragStatus.pending} item${ragStatus.pending === 1 ? "" : "s"} waiting` : ""}`}
                       </span>
                     </div>
                     <button
-                      onClick={handleRebuildIndex}
+                      onClick={() => handleRebuildIndex()}
                       disabled={ragBusy}
                       className="btn-ghost text-xs border border-border flex items-center gap-1.5 flex-shrink-0 disabled:opacity-50"
                     >
@@ -580,8 +559,20 @@ export default function SettingsModal({ onClose }: Props) {
                     </button>
                   </div>
                   <p className="text-[11px] text-muted mt-1.5 leading-relaxed">
-                    Embeds locally via Ollama (<code className="font-mono">{EMBED_MODEL}</code>). Notes re-index automatically as you edit.
+                    {ragStatus?.embedder?.kind === "ollama"
+                      ? `Semantic index via ${ragStatus.embedder.label}.${ragStatus.embedderReady ? "" : " Ollama isn't reachable right now, so search falls back to keywords until it's back — Rebuild switches to the built-in index."}`
+                      : "Built-in on-device index — works with every AI vendor, no setup needed."}{" "}
+                    Notes, PDFs, calendar events and tasks re-index automatically as they change.
                   </p>
+                  {ragStatus?.embedder?.kind === "local" && ragStatus.ollamaReachable && (
+                    <button
+                      onClick={() => handleRebuildIndex("ollama")}
+                      disabled={ragBusy}
+                      className="btn-ghost text-xs border border-border mt-1.5 disabled:opacity-50"
+                    >
+                      Upgrade to semantic index (Ollama)
+                    </button>
+                  )}
                   {ragMsg && <p className="text-[11px] text-foreground-secondary mt-1">{ragMsg}</p>}
                   {ocrEscalations > 0 && (
                     <p className="text-[11px] text-muted mt-1" title={ocrLog.slice(0, 8).join("\n")}>
@@ -771,91 +762,7 @@ export default function SettingsModal({ onClose }: Props) {
             )}
 
             {/* Sync tab — Cloud Sync */}
-            {tab === "sync" && (
-            <section>
-              <div className="flex items-center gap-2 mb-3">
-                <Cloud className="w-3.5 h-3.5 text-muted" />
-                <span className="text-xs font-medium text-foreground-secondary uppercase tracking-wider">
-                  Cloud Sync
-                </span>
-              </div>
-              <div className="space-y-3">
-                <Toggle
-                  label="Enable cloud sync"
-                  description="Auto-saves notes every 5 min to a folder you control (Syncthing, Google Drive, etc.)."
-                  value={syncEnabled}
-                  onChange={setSyncEnabled}
-                />
-
-                {syncEnabled && (
-                  <>
-                    <div>
-                      <label className="block text-xs text-muted mb-1.5">Sync folder</label>
-                      <button
-                        onClick={async () => {
-                          const selected = await open({ directory: true, multiple: false });
-                          if (selected && typeof selected === "string") setSyncFolder(selected);
-                        }}
-                        className="flex items-center gap-2 w-full px-3 py-2 rounded-lg border border-border
-                                   text-sm text-left text-foreground-secondary hover:text-foreground
-                                   hover:border-border-active transition-all"
-                      >
-                        <FolderOpen className="w-3.5 h-3.5 flex-shrink-0 text-muted" />
-                        <span className="flex-1 truncate font-mono text-xs">
-                          {syncFolder ?? "No folder selected"}
-                        </span>
-                      </button>
-                      <p className="text-xs text-muted mt-1">
-                        Point this at a folder synced by Google Drive, Syncthing, Nextcloud, or iCloud Drive.
-                      </p>
-                    </div>
-
-                    {syncFolder && (
-                      <div className="flex items-center justify-between px-3 py-2 rounded-lg border border-border">
-                        <div className="flex items-center gap-2">
-                          {isSyncing ? (
-                            <RefreshCw className="w-3 h-3 text-muted animate-spin" />
-                          ) : lastSyncAt ? (
-                            <Cloud className="w-3 h-3 text-muted" />
-                          ) : (
-                            <CloudOff className="w-3 h-3 text-muted" />
-                          )}
-                          <span className="text-xs text-muted">
-                            {isSyncing
-                              ? "Syncing…"
-                              : lastSyncAt
-                              ? `Last synced ${new Date(lastSyncAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
-                              : "Not yet synced"}
-                          </span>
-                        </div>
-                        <button
-                          onClick={async () => {
-                            if (isSyncing) return;
-                            setIsSyncing(true);
-                            setSyncError(null);
-                            try {
-                              const { mergedNotes } = await fullSync(syncFolder, notes);
-                              useStore.getState().applyMergedNotes(mergedNotes);
-                              setLastSyncAt(new Date().toISOString());
-                              setHasPendingChanges(false);
-                            } catch (e) {
-                              setSyncError(e instanceof Error ? e.message : String(e));
-                            } finally {
-                              setIsSyncing(false);
-                            }
-                          }}
-                          disabled={isSyncing}
-                          className="text-xs text-muted hover:text-foreground transition-colors disabled:opacity-40"
-                        >
-                          Sync now
-                        </button>
-                      </div>
-                    )}
-                  </>
-                )}
-              </div>
-            </section>
-            )}
+            {tab === "sync" && <SyncSettings />}
 
             {/* Advanced tab — Danger Zone (the Update banner above is also gated here) */}
             {tab === "advanced" && (
@@ -872,6 +779,29 @@ export default function SettingsModal({ onClose }: Props) {
                 >
                   Replay
                 </button>
+              </div>
+
+              {/* MCP bridge — opt-in, needs a sync folder */}
+              <div className="mb-5">
+                <div className={syncFolder ? "" : "opacity-50 pointer-events-none"} aria-disabled={!syncFolder}>
+                  <Toggle
+                    label="Share live workspace with MCP server (opt-in)"
+                    description="Writes your schedule, open notes, the open PDF's text and study stats to a hidden .hades-bridge folder inside your sync folder, so a local MCP client can read them and log study time. Your cloud provider may upload those files. Off by default; turning it off deletes the snapshot."
+                    value={mcpBridgeEnabled && !!syncFolder}
+                    onChange={(v) => { if (syncFolder) setMcpBridgeEnabled(v); }}
+                  />
+                </div>
+                <p className={`text-xs mt-1.5 px-1 ${mcpBridgeEnabled && bridgeStatus.state === "error" ? "text-red-400" : "text-muted"}`}>
+                  {!syncFolder
+                    ? "Choose a sync folder in the Sync tab first."
+                    : !mcpBridgeEnabled
+                    ? "Off — nothing is written."
+                    : bridgeStatus.state === "error"
+                    ? `Problem: ${bridgeStatus.error}`
+                    : bridgeStatus.lastWriteAt
+                    ? `Sharing. Last update ${new Date(bridgeStatus.lastWriteAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}.`
+                    : "Starting…"}
+                </p>
               </div>
 
               <div className="flex items-center gap-2 mb-3">
@@ -895,8 +825,7 @@ export default function SettingsModal({ onClose }: Props) {
                     if (ok) {
                       wipeAllAIData();
                       await clearIndex();
-                      setRagChunks(0);
-                      setRagBuilt(null);
+                      setRagStatus(null);
                       setRagMsg(null);
                     }
                   }}
