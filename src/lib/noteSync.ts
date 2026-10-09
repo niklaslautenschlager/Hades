@@ -97,18 +97,63 @@ function errMessage(e: unknown): string {
 
 // ── Paths ─────────────────────────────────────────────────────────────────────
 
+// Cutting between the halves of a surrogate pair leaves a lone surrogate, which no filesystem API accepts.
+function truncateUnits(s: string, max: number): string {
+  if (s.length <= max) return s;
+  const last = s.charCodeAt(max - 1);
+  return s.slice(0, last >= 0xd800 && last <= 0xdbff ? max - 1 : max);
+}
+
 export function safeName(name: string): string {
-  const cleaned = name
-    .replace(/[/\\:*?"<>|]/g, "-")
-    .trim()
-    .slice(0, 80)
+  const cleaned = truncateUnits(
+    name
+      .replace(/[/\\:*?"<>|]/g, "-")
+      .trim(),
+    80
+  )
     // A leading dot would hide the file from every reader; Windows drops trailing dots and spaces.
     .replace(/^\.+/, (m) => "_".repeat(m.length))
     .replace(/[. ]+$/, "");
   return cleaned || "untitled";
 }
 
-const pathKey = (p: string) => p.normalize("NFC").toLowerCase();
+// Whether two spellings that differ only in case name the same file depends on the volume
+// (macOS and Windows fold case, Linux does not). Until it has been probed we assume the
+// folding case: wrongly treating a case-insensitive volume as case-sensitive would delete a
+// file it had just overwritten, while the opposite mistake only stalls a case-only rename.
+let foldCase = true;
+const pathKey = (p: string) => {
+  const nfc = p.normalize("NFC");
+  return foldCase ? nfc.toLowerCase() : nfc;
+};
+
+const caseProbeCache = new WeakMap<FsAdapter, Map<string, boolean>>();
+
+export async function detectCaseFold(fs: FsAdapter, root: string, tag: string): Promise<boolean> {
+  let byRoot = caseProbeCache.get(fs);
+  if (!byRoot) caseProbeCache.set(fs, (byRoot = new Map()));
+  const known = byRoot.get(root);
+  if (known !== undefined) return known;
+  const stem = `${TEMP_PREFIX}${tag}-CaseProbe-${randomSuffix()}${TEMP_SUFFIX}`;
+  const upper = joinRoot(root, stem);
+  let folds = true;
+  try {
+    await fs.writeTextFile(upper, "");
+    try {
+      folds = await fs.exists(joinRoot(root, stem.toLowerCase()));
+    } finally {
+      try {
+        await fs.remove(upper);
+      } catch {
+        // A leftover probe is swept like any other temp file of this device.
+      }
+    }
+    byRoot.set(root, folds);
+  } catch {
+    // Read-only or unavailable folder: keep the safe assumption and probe again next run.
+  }
+  return folds;
+}
 
 function joinRoot(root: string, rel: string): string {
   const base = root.replace(/[\\/]+$/, "");
@@ -553,13 +598,20 @@ export async function applyRemote(
   root: string,
   snap: RemoteSnapshot,
   plan: ReconcilePlan,
-  deviceId: string
+  deviceId: string,
+  isCurrent: () => boolean = () => true
 ): Promise<void> {
+  // A run that timed out is abandoned, not cancelled: without this check its remaining
+  // writes would land on top of whatever the next run has already put in the folder.
+  const alive = () => {
+    if (!isCurrent()) throw new SyncError("error", "Sync was abandoned after a timeout.");
+  };
   const tag = deviceId.slice(0, 8);
   const byId = new Map(plan.merged.map((m) => [m.id, m]));
   const knownDirs = new Set(snap.dirs.map(pathKey));
   const ensureDir = async (rel: string) => {
     if (!rel || knownDirs.has(pathKey(rel))) return;
+    alive();
     await fs.mkdir(joinRoot(root, rel));
     knownDirs.add(pathKey(rel));
   };
@@ -589,6 +641,7 @@ export async function applyRemote(
     return ca - cb || (a.rel < b.rel ? -1 : a.rel > b.rel ? 1 : 0);
   });
   for (const job of jobs) {
+    alive();
     await ensureDir(dirOf(job.rel));
     await atomicWrite(fs, root, job.rel, serializeNote(job.note, deviceId), tag);
   }
@@ -602,6 +655,7 @@ export async function applyRemote(
     folderSignature(m.folders) !== folderSignature(folders) ||
     tombstoneSignature(m.tombstones) !== tombstoneSignature(plan.tombstones);
   if (manifestChanged) {
+    alive();
     const body = {
       version: 2,
       rev: (m?.rev ?? 0) + 1,
@@ -615,6 +669,7 @@ export async function applyRemote(
 
   // Cleanup is best effort: whatever fails here is attributable and retried next run.
   const rm = async (rel: string) => {
+    alive();
     try {
       await fs.remove(joinRoot(root, rel));
     } catch {
@@ -719,6 +774,7 @@ async function execute(root: string, fs: FsAdapter, isCurrent: () => boolean): P
       const baseCount = Object.keys(base).length;
 
       await preflight(fs, root, baseCount);
+      foldCase = await detectCaseFold(fs, root, deviceId.slice(0, 8));
       const remote = await readRemote(fs, root, {
         deviceId,
         base,
@@ -740,7 +796,7 @@ async function execute(root: string, fs: FsAdapter, isCurrent: () => boolean): P
         deviceId,
         now: Date.now(),
       });
-      await applyRemote(fs, root, remote, plan, deviceId);
+      await applyRemote(fs, root, remote, plan, deviceId, isCurrent);
       if (!isCurrent()) return { ...outcome, ok: false, kind: "error", message: "Sync was abandoned after a timeout." };
 
       const res = useStore.getState().commitSyncResult(snapshot, plan);

@@ -133,8 +133,14 @@ export async function buildOpenDocumentContext(opts: { timeoutMs?: number } = {}
       } else if (!pdf.text) {
         sections.push(`### Open PDF: ${pdf.title}${where}\nNo selectable text was found in this PDF (it may be a scan).`);
       } else {
+        // Text cached from OCR or from a scan carries no page markers; claiming otherwise
+        // would make the model cite page numbers it cannot know.
+        const paged = /^\[Page \d+\]/m.test(pdf.text);
+        const layout = paged
+          ? "Pages are labelled [Page N]; the page the user is on comes first."
+          : "This text is not split by page, so do not cite page numbers from it.";
         sections.push(
-          `### Open PDF: ${pdf.title}${where}\nPages are labelled [Page N]; the page the user is on comes first.\n${pdf.text}${pdf.truncated ? "\n…(truncated — only part of the document is shown)" : ""}`
+          `### Open PDF: ${pdf.title}${where}\n${layout}\n${pdf.text}${pdf.truncated ? "\n…(truncated — only part of the document is shown)" : ""}`
         );
         if (pdf.docId && !pdf.truncated) covered.push(pdf.docId);
       }

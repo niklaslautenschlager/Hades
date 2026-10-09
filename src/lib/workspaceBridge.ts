@@ -523,6 +523,9 @@ function startRun(folder: string): Run {
 
   const ensureDirs = async () => {
     if (dirsReady) return;
+    // A recursive mkdir would recreate an unmounted or deleted sync folder on whatever disk
+    // is there now and park the private snapshot in it.
+    if (!(await guard(exists(folder)))) throw new Error("The sync folder is not available.");
     await guard(mkdir(inboxDir, { recursive: true }));
     await guard(mkdir(acksDir, { recursive: true }));
     dirsReady = true;
@@ -642,12 +645,16 @@ function startRun(folder: string): Run {
     const names = entries.filter((e) => e.isFile && COMMAND_FILE.test(e.name)).slice(0, MAX_ACKS_PER_PRUNE);
     for (const entry of names) {
       const file = `${acksDir}/${entry.name}`;
-      let expired = true;
+      // Only a file that names itself as the ack for exactly this id is ours to delete; anything
+      // else that happens to be in the folder (or behind a link planted there) is left alone.
+      let expired = false;
       try {
-        const at = Date.parse((JSON.parse(await guard(readTextFile(file))) as { at?: unknown }).at as string);
+        const ack = JSON.parse(await guard(readTextFile(file))) as { id?: unknown; at?: unknown };
+        if (ack.id !== entry.name.replace(/\.json$/, "")) continue;
+        const at = Date.parse(ack.at as string);
         expired = Number.isNaN(at) || Date.now() - at > ACK_TTL_MS;
       } catch {
-        expired = true;
+        continue;
       }
       if (expired) await guard(remove(file)).catch(() => undefined);
     }

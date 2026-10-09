@@ -132,6 +132,20 @@ describe("buildOpenDocumentContext", () => {
     expect((await buildOpenDocumentContext()).text).toContain("No selectable text was found");
   });
 
+  it("does not claim page labels for text that has no page structure (OCR / scanned library PDFs)", async () => {
+    h.libraryDocCachedText.mockResolvedValue("recognised text with no page breaks at all");
+    h.extractPdfPages.mockResolvedValue({ pages: [], pageCount: 0 });
+    useStore.setState({
+      libraryDocs: [{ id: "d9", title: "Scanned notes", fileName: "scan.pdf", pageCount: 5, addedAt: "" }],
+      notePdfUrl: "blob:scan", notePdfFileName: "Scanned notes", notePdfDocId: "d9", pdfPages: { d9: 3 },
+    });
+    const { text } = await buildOpenDocumentContext();
+    expect(text).toContain("recognised text with no page breaks at all");
+    expect(text).toContain("not split by page");
+    expect(text).not.toContain("Pages are labelled");
+    expect(text).not.toMatch(/\[Page \d+\]/);
+  });
+
   it("marks a truncated PDF and does not list it as fully covered", async () => {
     h.libraryDocCachedText.mockResolvedValue(Array.from({ length: 6 }, (_, i) => `page${i + 1} ` + "y".repeat(3000)).join("\n\n"));
     useStore.setState({

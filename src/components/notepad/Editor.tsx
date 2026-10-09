@@ -6,7 +6,7 @@ import {
   drawSelection,
   highlightActiveLine,
 } from "@codemirror/view";
-import { EditorState, Compartment, Prec } from "@codemirror/state";
+import { EditorState, Compartment, Prec, Annotation, Transaction } from "@codemirror/state";
 import {
   defaultKeymap,
   history,
@@ -34,6 +34,7 @@ import {
 } from "../../lib/markdownDecorations";
 import { mathLiveDecorations } from "../../lib/mathDecorations";
 import { registerEditorView } from "../../lib/editorBridge";
+import { externalEdit } from "../../lib/editorSync";
 import { assistRewrite, verifyAgainstSource, translateText, askRewrite, type AssistAction } from "../../lib/noteAssist";
 import { libraryDocText } from "../../lib/pdfLibrary";
 
@@ -77,6 +78,9 @@ const ASSIST_ACTIONS: { id: AssistAction; label: string }[] = [
   { id: "continue", label: "Continue" },
 ];
 
+// Marks edits applied from the store so the update listener does not echo them back.
+const fromStore = Annotation.define<boolean>();
+
 export default function Editor({ noteId, content, onChange }: Props) {
   const isVimMode = useStore((s) => s.isVimMode);
   const aiEnabled = useStore((s) => s.aiEnabled);
@@ -103,6 +107,7 @@ export default function Editor({ noteId, content, onChange }: Props) {
   const vimCompartment      = useRef(new Compartment());
   const fontSizeCompartment = useRef(new Compartment());
   const onChangeRef = useRef(onChange);
+  const lastEmitted = useRef(content);
   const [initError, setInitError] = useState<string | null>(null);
   // §4.2 — note zoom (font size) is remembered per note.
   const [fontSize, setFontSize] = useState(() => useStore.getState().noteZoom[noteId] ?? 15);
@@ -269,16 +274,19 @@ export default function Editor({ noteId, content, onChange }: Props) {
     } catch { /* ignore */ }
   }, [isVimMode]);
 
-  // Sync content when switching notes (do NOT re-init the editor)
+  // Content that changed outside the editor (a cloud-sync pull) must reach the open buffer,
+  // otherwise the next keystroke writes the stale buffer back over it.
   useEffect(() => {
     const view = viewRef.current;
     if (!view) return;
-    const current = view.state.doc.toString();
-    if (current !== content) {
-      view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: content } });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [noteId]);
+    const edit = externalEdit(view.state.doc.toString(), content, lastEmitted.current);
+    lastEmitted.current = content;
+    if (!edit) return;
+    view.dispatch({
+      changes: edit,
+      annotations: [fromStore.of(true), Transaction.addToHistory.of(false)],
+    });
+  }, [noteId, content]);
 
   // Initialize editor once per note ID
   useEffect(() => {
@@ -338,7 +346,11 @@ export default function Editor({ noteId, content, onChange }: Props) {
       });
 
       const updateListener = EditorView.updateListener.of((update) => {
-        if (update.docChanged) onChangeRef.current(update.state.doc.toString());
+        if (update.docChanged && !update.transactions.some((t) => t.annotation(fromStore))) {
+          const text = update.state.doc.toString();
+          lastEmitted.current = text;
+          onChangeRef.current(text);
+        }
         if (update.selectionSet || update.docChanged) {
           // Debounce so the popover appears after the drag settles, not during.
           if (assistTimer.current) clearTimeout(assistTimer.current);

@@ -286,6 +286,51 @@ describe("reconcile: deletes", () => {
     expect(p.localUpserts.map((u) => u.id)).toEqual(["a"]);
   });
 
+  it("keeps an unsynced local edit that a remote deletion never saw, and sends it back", () => {
+    const synced = note("a", { content: "v1", updatedAt: ts(10) });
+    const edited = note("a", { content: "v1 plus my offline edit", updatedAt: ts(15) });
+    const p = run({ local: [edited], remote: [remoteOf(synced)], base: baseOf(synced), remoteTombstones: { a: ts(20) } });
+    expect(byId(p, "a")!.content).toBe("v1 plus my offline edit");
+    expect(Date.parse(byId(p, "a")!.updatedAt)).toBeGreaterThan(Date.parse(ts(20)));
+    expect(p.remoteWrites.map((w) => w.id)).toEqual(["a"]);
+    expect(p.localDeletes).toEqual([]);
+  });
+
+  it("still deletes a local copy that is exactly the version this device last synced", () => {
+    const synced = note("a", { content: "v1", updatedAt: ts(10) });
+    const p = run({ local: [synced], remote: [remoteOf(synced)], base: baseOf(synced), remoteTombstones: { a: ts(20) } });
+    expect(p.merged).toEqual([]);
+    expect(p.localDeletes).toEqual(["a"]);
+  });
+
+  it("does not rescue when this device never synced the item (no base to compare against)", () => {
+    const stale = note("a", { content: "stale", updatedAt: ts(10) });
+    const p = run({ local: [stale], remote: [], base: {}, remoteTombstones: { a: ts(20) } });
+    expect(p.merged).toEqual([]);
+  });
+
+  it("does not rescue folders, which carry no user text", () => {
+    const f = folder("f", { name: "Renamed offline", updatedAt: ts(15) });
+    const p = run({ local: [f], remote: [], base: baseOf(folder("f", { updatedAt: ts(10) })), remoteTombstones: { f: ts(20) } });
+    expect(p.merged).toEqual([]);
+  });
+
+  it("settles after a rescue: the next reconcile has nothing left to do", () => {
+    const synced = note("a", { content: "v1", updatedAt: ts(10) });
+    const edited = note("a", { content: "mine", updatedAt: ts(15) });
+    const first = run({ local: [edited], remote: [remoteOf(synced)], base: baseOf(synced), remoteTombstones: { a: ts(20) } });
+    const res = applyPlanLocally({ notes: [edited], tombstones: {} }, { notes: [edited], base: baseOf(synced), tombstones: {} }, first);
+    const second = run({
+      local: res.notes,
+      remote: first.remoteWrites,
+      base: res.base,
+      localTombstones: res.tombstones,
+      remoteTombstones: first.tombstones,
+      now: ts(2000),
+    });
+    expect(second.isEmpty).toBe(true);
+  });
+
   it("deletes when the tombstone is equal to or newer than the last edit", () => {
     const n = note("a", { updatedAt: ts(20) });
     const p = run({ local: [n], remote: [remoteOf(n)], base: baseOf(n), remoteTombstones: { a: ts(20) } });

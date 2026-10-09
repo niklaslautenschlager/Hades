@@ -33,7 +33,7 @@ Under the folder picker, Settings shows whether Hades is syncing, when it last s
 
 - **Two devices edit the same note.** Hades compares each note with the version both sides last agreed on. If only one side changed, that change wins. If both changed and the text differs, the newer edit becomes the note and the other version is **kept as a separate note named "… (conflict copy …)"**. Nothing is silently overwritten — review the copy and delete whichever you don't need.
 - **Edits while a sync is running** are never lost. If you type during a sync, Hades notices and syncs those edits on the next pass.
-- **Deletions** travel as explicit deletion records. A note that is merely missing from the sync folder is *not* treated as deleted — it may not have finished downloading yet — so Hades re-uploads it instead. Editing a note on one device after it was deleted on another brings it back.
+- **Deletions** travel as explicit deletion records. A note that is merely missing from the sync folder is *not* treated as deleted — it may not have finished downloading yet — so Hades re-uploads it instead. Editing a note on one device after it was deleted on another brings it back. Edits you have made but not yet synced are kept too, even if another device deleted the note in the meantime.
 - **A note is only ever changed or removed in the sync folder when Hades can match the file to a note it knows.** Files it doesn't recognise, and anything whose name starts with a dot (such as `.hades-bridge`), are left alone.
 
 ## If the sync folder is unavailable

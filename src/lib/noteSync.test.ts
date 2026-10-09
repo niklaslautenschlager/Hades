@@ -166,6 +166,26 @@ class FakeFs implements FsAdapter {
   }
 }
 
+/** Case-preserving, case-insensitive volume (macOS default, Windows): "Maths" and "maths" are one directory. */
+class CaseFoldFs extends FakeFs {
+  private canon(p: string): string {
+    let cur = "";
+    for (const part of p.split("/").filter(Boolean)) {
+      const want = `${cur}/${part}`;
+      const hit = [...this.dirs, ...this.files.keys()].find((k) => k.toLowerCase() === want.toLowerCase());
+      cur = hit ?? want;
+    }
+    return cur || "/";
+  }
+  readDir(p: string) { return super.readDir(this.canon(p)); }
+  readTextFile(p: string) { return super.readTextFile(this.canon(p)); }
+  writeTextFile(p: string, d: string) { return super.writeTextFile(this.canon(p), d); }
+  mkdir(p: string) { return super.mkdir(this.canon(p)); }
+  remove(p: string) { return super.remove(this.canon(p)); }
+  rename(a: string, b: string) { return super.rename(this.canon(a), this.canon(b)); }
+  exists(p: string) { return super.exists(this.canon(p)); }
+}
+
 // ── Store scaffolding ────────────────────────────────────────────────────────
 
 const pristine = useStore.getState();
@@ -595,7 +615,7 @@ describe("failures while writing", () => {
   it("does not leave a half-written file behind when the temp write itself fails", async () => {
     const fs = new FakeFs();
     setDevice({ notes: [mk("n1")] });
-    fs.failNext("write", () => true, 1);
+    fs.failNext("write", (p) => !p.includes("CaseProbe"), 1);
     const out = await syncNow({ fs });
     expect(out.ok).toBe(false);
     expect(fs.mdRels()).toEqual([]);
@@ -628,7 +648,7 @@ describe("failures while writing", () => {
   it("classifies a failure on a reachable folder as a plain error", async () => {
     const fs = new FakeFs();
     setDevice({ notes: [mk("n1")] });
-    fs.failNext("write", () => true, 1);
+    fs.failNext("write", (p) => !p.includes("CaseProbe"), 1);
     const out = await syncNow({ fs });
     expect(out.kind).toBe("error");
     expect(state().syncStatus).toBe("error");
@@ -1005,6 +1025,96 @@ describe("single-flight lock and timeouts", () => {
       expect(again.ok).toBe(true);
       expect(fs.mdRels()).toEqual(["Note n1-n1.md"]);
     });
+
+    it("stops an abandoned run from writing once it has timed out", async () => {
+      const fs = new FakeFs();
+      setDevice({ notes: [mk("n1"), mk("n2"), mk("n3")] });
+      let fired = false;
+      fs.onOp = (op) => {
+        if (op.op === "write" && !op.path.includes("CaseProbe") && !fired) {
+          fired = true;
+          vi.advanceTimersByTime(5 * 60_000 + 10); // the run times out in the middle of its writes
+        }
+      };
+      const out = await syncNow({ fs });
+      expect(out).toMatchObject({ ok: false, kind: "error" });
+      expect(out.message).toMatch(/timed out/);
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(fs.mdRels()).toHaveLength(1);
+      expect(fs.manifest()).toBeUndefined();
+    });
+  });
+});
+
+describe("case-only renames", () => {
+  const conflictCopies = () => state().notes.filter((n) => n.name.includes("conflict copy"));
+
+  async function renameFolderCaseOnly(fs: FakeFs) {
+    setDevice({ notes: [mkFolder("f1", { name: "Maths" }), mk("n1", { parentId: "f1", name: "Algebra", content: "x = 1" })] });
+    expect((await syncNow({ fs })).ok).toBe(true);
+    state().updateNote("f1", { name: "maths" });
+    return syncNow({ fs });
+  }
+
+  it("on a case-sensitive volume the renamed folder is created and the old one removed", async () => {
+    const fs = new FakeFs();
+    const out = await renameFolderCaseOnly(fs);
+    expect(out.ok).toBe(true);
+    expect(fs.mdRels()).toEqual(["maths/Algebra-n1.md"]);
+    expect(fs.dirs.has(`${ROOT}/Maths`)).toBe(false);
+    expect(conflictCopies()).toEqual([]);
+    expect(noteById("n1")?.content).toBe("x = 1");
+  });
+
+  it("on a case-insensitive volume nothing is deleted after the same folder is 'renamed'", async () => {
+    const fs = new CaseFoldFs();
+    const out = await renameFolderCaseOnly(fs);
+    expect(out.ok).toBe(true);
+    expect(fs.mdRels()).toHaveLength(1);
+    expect(fs.read(fs.mdRels()[0])).toContain("x = 1");
+    expect(conflictCopies()).toEqual([]);
+    expect(noteById("n1")?.content).toBe("x = 1");
+  });
+
+  for (const [label, make] of [["case-sensitive", () => new FakeFs()], ["case-insensitive", () => new CaseFoldFs()]] as const) {
+    it(`a note renamed only in case leaves exactly one file and no conflict copy (${label})`, async () => {
+      const fs = make();
+      setDevice({ notes: [mk("n1", { name: "Foo", content: "body" })] });
+      expect((await syncNow({ fs })).ok).toBe(true);
+      state().updateNote("n1", { name: "foo" });
+      expect((await syncNow({ fs })).ok).toBe(true);
+      expect((await syncNow({ fs })).ok).toBe(true);
+      expect(fs.mdRels()).toHaveLength(1);
+      expect(fs.read(fs.mdRels()[0])).toContain("body");
+      expect(conflictCopies()).toEqual([]);
+      expect(state().notes.filter((n) => !n.isFolder)).toHaveLength(1);
+    });
+  }
+
+  it("probes the volume once per folder and leaves no probe file behind", async () => {
+    const fs = new FakeFs();
+    setDevice({ notes: [mk("n1")] });
+    await syncNow({ fs });
+    await syncNow({ fs });
+    const probeWrites = fs.log.filter((o) => o.op === "write" && o.path.includes("CaseProbe"));
+    expect(probeWrites).toHaveLength(1);
+    expect(fs.rels().filter((r) => r.includes("CaseProbe"))).toEqual([]);
+  });
+});
+
+describe("file names", () => {
+  const lone = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/;
+
+  it("never cuts an emoji in half when shortening a long title", () => {
+    for (const pad of [77, 78, 79, 80, 81]) {
+      const name = safeName("x".repeat(pad) + "😀😀😀");
+      expect(lone.test(name)).toBe(false);
+      expect(name.length).toBeLessThanOrEqual(80);
+    }
+  });
+
+  it("keeps ordinary long names at 80 units", () => {
+    expect(safeName("y".repeat(200))).toHaveLength(80);
   });
 });
 

@@ -493,6 +493,7 @@ beforeEach(() => {
   vi.setSystemTime(NOW);
   fsState.files.clear();
   fsState.dirs.clear();
+  fsState.dirs.add(FOLDER);
   fsState.calls.length = 0;
   fsState.fail.clear();
   fsState.writeDelayMs = 0;
@@ -686,6 +687,16 @@ describe("startWorkspaceBridge: snapshot", () => {
     expect(getBridgeStatus().state).toBe("error");
   });
 
+  it("never recreates a missing sync folder and writes nothing when it is gone", async () => {
+    fsState.dirs.delete(FOLDER);
+    start();
+    await tick(60_000);
+    expect(fsState.calls.filter((c) => c.startsWith("mkdir"))).toEqual([]);
+    expect(fsState.files.size).toBe(0);
+    expect(getBridgeStatus().state).toBe("error");
+    expect(getBridgeStatus().error).toContain("not available");
+  });
+
   it("surfaces filesystem failures as status, never as exceptions", async () => {
     fsState.fail.set("mkdir", 1000);
     start();
@@ -721,6 +732,7 @@ describe("startWorkspaceBridge: snapshot", () => {
   it("moves the snapshot when the sync folder changes", async () => {
     start();
     await tick(1_000);
+    fsState.dirs.add("/other/place");
     useStore.getState().setSyncFolder("/other/place");
     await tick(1_000);
     expect(fsState.files.has(`${BRIDGE}/state.json`)).toBe(false);
@@ -862,18 +874,22 @@ describe("startWorkspaceBridge: commands", () => {
     expect(ackOf("quick")).toMatchObject({ ok: true });
   });
 
-  it("prunes acks older than ten minutes and unreadable ones, keeping fresh ones", async () => {
+  it("prunes acks older than ten minutes, keeping fresh ones and never touching files that are not acks", async () => {
     start();
     await tick(1_000);
     const ack = (id: string, at: string) => fsState.files.set(`${BRIDGE}/acks/${id}.json`, JSON.stringify({ v: 1, id, at }));
     ack("fresh", new Date(Date.now() - 60_000).toISOString());
     ack("old", new Date(Date.now() - 11 * 60_000).toISOString());
     fsState.files.set(`${BRIDGE}/acks/garbled.json`, "###");
+    fsState.files.set(`${BRIDGE}/acks/foreign.json`, JSON.stringify({ unrelated: "somebody else's file" }));
+    fsState.files.set(`${BRIDGE}/acks/mismatch.json`, JSON.stringify({ v: 1, id: "other", at: "2000-01-01T00:00:00.000Z" }));
     fsState.files.set(`${BRIDGE}/acks/notes.txt`, "keep");
     await tick(61_000);
     expect(fsState.files.has(`${BRIDGE}/acks/fresh.json`)).toBe(true);
     expect(fsState.files.has(`${BRIDGE}/acks/old.json`)).toBe(false);
-    expect(fsState.files.has(`${BRIDGE}/acks/garbled.json`)).toBe(false);
+    expect(fsState.files.has(`${BRIDGE}/acks/garbled.json`)).toBe(true);
+    expect(fsState.files.has(`${BRIDGE}/acks/foreign.json`)).toBe(true);
+    expect(fsState.files.has(`${BRIDGE}/acks/mismatch.json`)).toBe(true);
     expect(fsState.files.has(`${BRIDGE}/acks/notes.txt`)).toBe(true);
   });
 

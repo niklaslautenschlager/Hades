@@ -493,9 +493,18 @@ export function reconcile(input: ReconcileInput): ReconcilePlan {
 
   const ids = [...new Set([...local.keys(), ...remote.keys()])].sort();
   for (const id of ids) {
-    const L = local.get(id);
+    let L = local.get(id);
     const R = remote.get(id);
+    const B = base[id];
     const tMs = tombstones[id] === undefined ? -Infinity : Date.parse(tombstones[id]);
+    // An edit this device has not pushed yet must not die silently to a deletion made elsewhere
+    // that never saw it: the edit is kept and, being newer than the tombstone, travels back.
+    if (
+      L !== undefined && !L.isFolder && B !== undefined && remoteTomb[id] !== undefined &&
+      Date.parse(L.updatedAt) <= tMs && !matchesBase(L, B)
+    ) {
+      L = { ...L, updatedAt: new Date(Math.max(nowMs, tMs + 1)).toISOString() };
+    }
     const aliveL = L !== undefined && Date.parse(L.updatedAt) > tMs;
     const aliveR = R !== undefined && Date.parse(R.updatedAt) > tMs;
 
